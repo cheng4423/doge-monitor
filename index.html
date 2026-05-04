@@ -5,28 +5,47 @@
 <title>狗狗币 AI 交易曲线</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
 body {
-  background:#0b0f1a; color:#fff; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto;
-  padding:20px; margin:0; overflow-x:hidden;
+  background:#0b0f1a; color:#fff;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto;
+  padding:20px; margin:0;
 }
 .container { max-width:600px; margin:auto; }
-.card { background:#161b2e; padding:20px; border-radius:12px; margin-bottom:15px; }
-.price { font-size:36px; font-weight:bold; color:#4da3ff; margin:10px 0; }
-.controls input { width:100%; padding:8px; border-radius:8px; border:none; margin-bottom:8px; }
-button { width:100%; padding:10px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; margin-top:5px; }
+.card {
+  background:#161b2e; padding:20px;
+  border-radius:12px; margin-bottom:15px;
+}
+.price {
+  font-size:36px; font-weight:bold;
+  color:#4da3ff; margin:10px 0;
+}
+.controls input {
+  width:100%; padding:8px;
+  border-radius:8px; border:none; margin-bottom:8px;
+}
+button {
+  width:100%; padding:10px;
+  border:none; border-radius:8px;
+  font-weight:bold; cursor:pointer; margin-top:5px;
+}
 .buy { background:#00c48c; color:#000; }
 .sell { background:#ff5c5c; color:#fff; }
-.info { background:#1f2747; padding:15px; border-radius:10px; margin-top:15px; }
+.info {
+  background:#1f2747; padding:15px;
+  border-radius:10px; margin-top:15px;
+}
 .signal { font-size:12px; margin-top:5px; }
 .good { color:#00ff88; }
 .danger { color:#ff6666; }
 .warn { color:#ffcc00; }
-#chartContainer { width:100%; height:300px; margin-top:20px; }
 </style>
 </head>
+
 <body>
 <div class="container">
+
   <div class="card">
     <h1>🐶 狗狗币 AI 交易曲线</h1>
     <div class="price" id="price">--</div>
@@ -35,124 +54,190 @@ button { width:100%; padding:10px; border:none; border-radius:8px; font-weight:b
 
   <div class="card controls">
     <input id="amount" placeholder="输入金额 (USDT)" value="100" />
-    <button class="buy" onclick="buy()">🟢 模拟买入（扣手续费）</button>
-    <button class="sell" onclick="sell()">🔴 模拟卖出（扣手续费）</button>
+    <button class="buy" onclick="buy()">🟢 模拟买入</button>
+    <button class="sell" onclick="sell()">🔴 模拟卖出</button>
   </div>
 
   <div class="card info" id="account">加载账户中...</div>
   <div class="card signal" id="signal">分析信号中...</div>
+
 </div>
 
 <script>
 const FEE = 0.001;
-let price = 0, chart, prices = [], signals = [];
+let price = 0;
+let chart;
+const prices = [];
+const signals = [];
 
-// 账户
-function loadAccount() { let acc = JSON.parse(localStorage.getItem("doge_account")); if (!acc) { acc = { usdt: 1000, doge: 0, avgPrice: 0 }; localStorage.setItem("doge_account", JSON.stringify(acc)); } return acc; }
-function saveAccount(acc) { localStorage.setItem("doge_account", JSON.stringify(acc)); }
+/* ---------- 账户 ---------- */
+function loadAccount() {
+  let acc = JSON.parse(localStorage.getItem("doge_account"));
+  if (!acc) {
+    acc = { usdt: 1000, doge: 0, avgPrice: 0 };
+    localStorage.setItem("doge_account", JSON.stringify(acc));
+  }
+  return acc;
+}
+function saveAccount(acc) {
+  localStorage.setItem("doge_account", JSON.stringify(acc));
+}
 
-// 图表
+/* ---------- 图表 ---------- */
 function initChart() {
   const ctx = document.getElementById('priceChart').getContext('2d');
   chart = new Chart(ctx, {
     type: 'line',
     data: {
       labels: [],
-      datasets: [{
-        label: 'DOGE 价格',
-        data: [],
-        borderColor: '#4da3ff',
-        fill: false,
-        tension: 0.3
-      }, {
-        label: '买入点',
-        data: [],
-        pointRadius: 8,
-        pointBackgroundColor: '#00ff88',
-        showLine: false
-      }, {
-        label: '卖出点',
-        data: [],
-        pointRadius: 8,
-        pointBackgroundColor: '#ff6666',
-        showLine: false
-      }]
+      datasets: [
+        {
+          label: 'DOGE 价格',
+          data: [],
+          borderColor: '#4da3ff',
+          fill: false,
+          tension: 0.3
+        },
+        {
+          label: '买入',
+          data: [],
+          pointRadius: 8,
+          pointBackgroundColor: '#00ff88',
+          showLine: false
+        },
+        {
+          label: '卖出',
+          data: [],
+          pointRadius: 8,
+          pointBackgroundColor: '#ff6666',
+          showLine: false
+        }
+      ]
     },
-    options: { plugins: { legend: { labels: { color: '#fff' } } }, scales: { x: { ticks: { color: '#aaa' } }, y: { ticks: { color: '#aaa' } } } }
+    options: {
+      plugins: { legend: { labels: { color: '#fff' } } },
+      scales: {
+        x: { ticks: { color: '#aaa' } },
+        y: { ticks: { color: '#aaa' } }
+      }
+    }
   });
 }
 
-// 分析买卖点
+/* ---------- 策略 ---------- */
 function analyzeSignal() {
-  if (prices.length < 5) return;
-  const p = prices[prices.length-1];
-  const avg = prices.slice(-5).reduce((a,b)=>a+b)/5;
+  if (prices.length < 6) return;
+
+  const p = prices.at(-1);
+  const avg = prices.slice(-6).reduce((a,b)=>a+b)/6;
   const change = ((p - avg)/avg*100).toFixed(2);
-  let signal = "🟡 观望";
-  if (p < avg*0.98 && change < -2) { signal = `<span class="good">▲ 建议买入（低于均线${Math.abs(change)}%）</span>`; signals.push({t:prices.length-1, v:p, s:'buy'}); }
-  else if (p > avg*1.02 && change > 2) { signal = `<span class="danger">▼ 建议卖出（高于均线${change}%）</span>`; signals.push({t:prices.length-1, v:p, s:'sell'}); }
+
+  let signal = `<span class="warn">🟡 观望</span>`;
+  if (p < avg * 0.985 && change < -1.5) {
+    signal = `<span class="good">▲ 建议买入（低于均线 ${Math.abs(change)}%）</span>`;
+    signals.push({ t: prices.length-1, v: p, s: 'buy' });
+  } else if (p > avg * 1.015 && change > 1.5) {
+    signal = `<span class="danger">▼ 建议卖出（高于均线 ${change}%）</span>`;
+    signals.push({ t: prices.length-1, v: p, s: 'sell' });
+  }
+
   document.getElementById("signal").innerHTML = signal;
   updateChart();
 }
 
-// 更新图表
+/* ---------- 图表更新 ---------- */
 function updateChart() {
   if (!chart) return;
-  const labels = prices.map((p,i)=>i+1);
-  chart.data.labels = labels;
+  chart.data.labels = prices.map((_, i) => i + 1);
   chart.data.datasets[0].data = prices;
-  chart.data.datasets[1].data = signals.filter(s=>s.s==='buy').map(s=>({x:s.t, y:s.v}));
-  chart.data.datasets[2].data = signals.filter(s=>s.s==='sell').map(s=>({x:s.t, y:s.v}));
+  chart.data.datasets[1].data =
+    signals.filter(s => s.s === 'buy').map(s => ({ x: s.t, y: s.v }));
+  chart.data.datasets[2].data =
+    signals.filter(s => s.s === 'sell').map(s => ({ x: s.t, y: s.v }));
   chart.update();
 }
 
-// 加载价格
+/* ---------- 价格加载 ---------- */
 async function loadPrice() {
-  const r = await fetch("/api/doge");
-  const d = await r.json();
-  price = parseFloat(d.price);
-  document.getElementById("price").innerText = price;
+  try {
+    const r = await fetch("/api/doge");
+    if (!r.ok) throw new Error("API error");
+    const d = await r.json();
+    price = parseFloat(d.price);
+  } catch (e) {
+    console.warn("价格获取失败，使用上次价格");
+    if (!price) price = 0.07;
+  }
+
+  document.getElementById("price").innerText = price.toFixed(4);
   prices.push(price);
   if (prices.length > 30) prices.shift();
+
   analyzeSignal();
   render();
 }
 
-// 交易
+/* ---------- 交易 ---------- */
 function buy() {
+  if (!price || price <= 0) return alert("价格未加载");
+
   const amount = parseFloat(document.getElementById("amount").value);
   if (!amount || amount <= 0) return alert("请输入有效金额");
-  let acc = loadAccount();
+
+  const acc = loadAccount();
   if (acc.usdt < amount) return alert("USDT 不足");
+
   const fee = amount * FEE;
-  const buyDoge = (amount - fee) / price;
+  const doge = (amount - fee) / price;
+
   acc.usdt -= amount;
-  acc.doge += buyDoge;
-  acc.avgPrice = acc.avgPrice ? (acc.avgPrice + price) / 2 : price;
+  acc.doge += doge;
+  acc.avgPrice = acc.doge
+    ? (acc.avgPrice * (acc.doge - doge) + price * doge) / acc.doge
+    : price;
+
   saveAccount(acc);
   render();
-  alert(`买入 ${buyDoge.toFixed(4)} DOGE，手续费：${fee.toFixed(2)} USDT`);
+  alert(`买入 ${doge.toFixed(4)} DOGE\n手续费 ${fee.toFixed(2)} USDT`);
 }
+
 function sell() {
-  let acc = loadAccount();
+  if (!price || price <= 0) return alert("价格未加载");
+
+  const acc = loadAccount();
   if (acc.doge <= 0) return alert("没有 DOGE");
+
   const value = acc.doge * price;
   const fee = value * FEE;
   const profit = value - fee - (acc.avgPrice * acc.doge);
+
   acc.usdt += value - fee;
   acc.doge = 0;
   acc.avgPrice = 0;
+
   saveAccount(acc);
-  alert(profit > 0 ? `✅ 盈利：${profit.toFixed(2)} USDT` : `⚠ 亏损：${profit.toFixed(2)} USDT`);
   render();
-}
-function render() {
-  const acc = loadAccount();
-  const pnl = acc.doge ? ((price - acc.avgPrice) / acc.avgPrice * 100).toFixed(2) : 0;
-  document.getElementById("account").innerHTML = `USDT：${acc.usdt.toFixed(2)}<br/>DOGE：${acc.doge.toFixed(4)}<br/>均价：${acc.avgPrice.toFixed(4)}<br/>浮动盈亏：${pnl}%`;
+  alert(profit >= 0
+    ? `✅ 盈利 ${profit.toFixed(2)} USDT`
+    : `⚠ 亏损 ${Math.abs(profit).toFixed(2)} USDT`);
 }
 
-// 启动
+/* ---------- 渲染 ---------- */
+function render() {
+  const acc = loadAccount();
+  const pnl = acc.avgPrice
+    ? ((price - acc.avgPrice) / acc.avgPrice * 100).toFixed(2)
+    : 0;
+
+  document.getElementById("account").innerHTML = `
+    USDT：${acc.usdt.toFixed(2)}<br/>
+    DOGE：${acc.doge.toFixed(4)}<br/>
+    均价：${acc.avgPrice.toFixed(4)}<br/>
+    浮动盈亏：${pnl}%
+  `;
+}
+
+/* ---------- 启动 ---------- */
 initChart();
 loadPrice();
 setInterval(loadPrice, 15000);
