@@ -1,90 +1,146 @@
 // api/doge.js
-// ✅ 欧易 OKX 模拟盘 + AI 分析（返回 signal 和 reason）
+// ⚠️ 实盘自动交易系统（高风险！）
+import crypto from 'crypto';
+
+const API_KEY = process.env.OKX_API_KEY;
+const SECRET = process.env.OKX_API_SECRET;
+const PASSPHRASE = process.env.OKX_API_PASSPHRASE;
+const TRADE_MODE = process.env.TRADE_MODE || 'DEMO'; // DEMO 或 REAL
+const BASE = 'https://www.okx.com';
+
+// 欧易签名
+function sign(timestamp, method, path, body = '') {
+  const message = timestamp + method + path + body;
+  return crypto.createHmac('sha256', SECRET).update(message).digest('base64');
+}
+
+// 🧠 AI 交易策略
+function getTradingSignal(price, history) {
+  if (history.length < 5) return { action: 'HOLD', reason: '数据不足' };
+  
+  const last5 = history.slice(-5);
+  const avg = last5.reduce((a,b) => a + b) / 5;
+  const change = ((price - avg) / avg) * 100;
+  
+  if (change <= -2.5) {
+    return { 
+      action: 'BUY', 
+      reason: `价格低于5周期均价 ${change.toFixed(2)}%，超跌反弹机会`,
+      confidence: 85
+    };
+  }
+  if (change >= 3.0) {
+    return { 
+      action: 'SELL', 
+      reason: `价格高于5周期均价 ${change.toFixed(2)}%，获利了结`,
+      confidence: 80
+    };
+  }
+  return { action: 'HOLD', reason: '波动较小，观望', confidence: 60 };
+}
+
+// 📈 执行实盘交易
+async function executeTrade(signal, price, balance) {
+  if (TRADE_MODE === 'DEMO') {
+    return { success: true, orderId: 'DEMO_' + Date.now(), mode: '模拟' };
+  }
+  
+  const timestamp = new Date().toISOString();
+  const path = '/api/v5/trade/order';
+  
+  // 仓位管理：每次下单 5%
+  const usdtAmount = balance * 0.05;
+  const dogeAmount = (usdtAmount / price).toFixed(0);
+  
+  const body = JSON.stringify({
+    instId: 'DOGE-USDT',
+    tdMode: 'cash',
+    side: signal.action === 'BUY' ? 'buy' : 'sell',
+    ordType: 'market',
+    sz: dogeAmount
+  });
+  
+  try {
+    const response = await fetch(BASE + path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'OK-ACCESS-KEY': API_KEY,
+        'OK-ACCESS-SIGN': sign(timestamp, 'POST', path, body),
+        'OK-ACCESS-TIMESTAMP': timestamp,
+        'OK-ACCESS-PASSPHRASE': PASSPHRASE
+      },
+      body
+    });
+    
+    const data = await response.json();
+    return { 
+      success: data.code === '0', 
+      orderId: data.data?.[0]?.ordId,
+      data: data
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
+  
+  const { action = 'analyze' } = req.query; // analyze 或 trade
 
   try {
-    // 1️⃣ 获取 DOGE 实时数据
-    const response = await fetch(
-      'https://www.okx.com/api/v5/market/ticker?instId=DOGE-USDT',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          'Referer': 'https://www.okx.com/',
-          'Host': 'www.okx.com'
-        }
+    // 1. 获取价格
+    const tickerRes = await fetch(`${BASE}/api/v5/market/ticker?instId=DOGE-USDT`);
+    const tickerData = await tickerRes.json();
+    const price = parseFloat(tickerData.data[0].last);
+    
+    // 历史数据
+    if (!global.priceHistory) global.priceHistory = [];
+    global.priceHistory.push(price);
+    if (global.priceHistory.length > 50) global.priceHistory.shift();
+    
+    // 2. 🧠 AI 信号
+    const signal = getTradingSignal(price, global.priceHistory);
+    
+    // 3. 获取余额
+    const timestamp = new Date().toISOString();
+    const balanceRes = await fetch(`${BASE}/api/v5/account/balance`, {
+      headers: {
+        'OK-ACCESS-KEY': API_KEY,
+        'OK-ACCESS-SIGN': sign(timestamp, 'GET', '/api/v5/account/balance'),
+        'OK-ACCESS-TIMESTAMP': timestamp,
+        'OK-ACCESS-PASSPHRASE': PASSPHRASE
       }
-    );
+    });
+    const balanceData = await balanceRes.json();
+    const usdtBalance = parseFloat(balanceData.data[0]?.details?.find(d => d.ccy === 'USDT')?.availBal || 0);
     
-    const json = await response.json();
-    if (json.code !== '0') throw new Error(json.msg || 'OKX API 错误');
-
-    const data = json.data[0];
-    const price = parseFloat(data.last);
-    const open = parseFloat(data.open24h);
-    const high = parseFloat(data.high24h);
-    const low = parseFloat(data.low24h);
-    const vol = parseFloat(data.vol24h);
+    // 4. 执行交易
+    let tradeResult = null;
+    if (action === 'trade' && signal.action !== 'HOLD') {
+      tradeResult = await executeTrade(signal, price, usdtBalance);
+    }
     
-    const change = ((price - open) / open) * 100;
-    
-    // 2️⃣ 🧠 AI 分析逻辑
-    let signal = 'HOLD';
-    let reason = '';
-    let confidence = 0;
-
-    // 策略 1：大跌抄底
-    if (change <= -2.0) {
-      signal = 'BUY';
-      confidence = 85;
-      reason = `暴跌 ${change.toFixed(2)}%，价格已跌破支撑位 ${low.toFixed(4)}，是绝佳抄底机会`;
-    } 
-    // 策略 2：大涨止盈
-    else if (change >= 2.5) {
-      signal = 'SELL';
-      confidence = 80;
-      reason = `暴涨 ${change.toFixed(2)}%，已接近阻力位 ${high.toFixed(4)}，建议分批止盈`;
-    }
-    // 策略 3：小幅下跌
-    else if (change <= -0.8) {
-      signal = 'BUY';
-      confidence = 65;
-      reason = `回调 ${change.toFixed(2)}%，成交量 ${(vol/10000).toFixed(0)}万，是低吸机会`;
-    }
-    // 策略 4：小幅上涨
-    else if (change >= 1.2) {
-      signal = 'SELL';
-      confidence = 60;
-      reason = `上涨 ${change.toFixed(2)}%，但成交量一般，建议部分止盈`;
-    }
-    // 策略 5：震荡观望
-    else {
-      signal = 'HOLD';
-      confidence = 70;
-      reason = `价格在 ${low.toFixed(4)}-${high.toFixed(4)} 区间震荡（${change.toFixed(2)}%），等待突破`;
-    }
-
-    // 3️⃣ 返回给前端的数据
     res.status(200).json({
       success: true,
+      mode: TRADE_MODE,
       price,
-      change: change.toFixed(2),
-      high: high.toFixed(4),
-      low: low.toFixed(4),
-      volume: (vol/10000).toFixed(0),
-      signal,  // ✅ 前端需要的字段
-      reason,  // ✅ 前端需要的字段
-      confidence,
-      timestamp: Date.now()
+      signal: signal.action,
+      reason: signal.reason,
+      confidence: signal.confidence,
+      balance: usdtBalance.toFixed(2),
+      tradeResult,
+      history: global.priceHistory.slice(-10)
     });
 
   } catch (error) {
-    console.error('API 错误:', error);
+    console.error('实盘错误:', error);
     res.status(500).json({ 
-      success: false,
-      error: error.message 
+      success: false, 
+      error: error.message,
+      mode: TRADE_MODE
     });
   }
 }
