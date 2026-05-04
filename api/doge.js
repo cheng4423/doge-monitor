@@ -1,48 +1,50 @@
 // api/doge.js
-// ✅ 终极稳定版：解决 Vercel + Binance 403 问题
+// ✅ 欧易 OKX 狗狗币价格接口（已修复 URL 和解析）
 
 export default async function handler(req, res) {
-  // 1. 允许跨域（必须）
+  // 1. 允许前端跨域访问
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
   try {
-    // 2. 请求 Binance API（关键：Headers 必须齐全）
+    // 2. 🔥 修改点：URL 换成欧易的
     const response = await fetch(
-      'https://api.binance.com/api/v3/ticker/24hr?symbol=DOGEUSDT',
+      'https://www.okx.com/api/v5/market/ticker?instId=DOGE-USDT',
       {
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
           'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': 'https://www.binance.com/', // 🔥 必须是 binance 域名
-          'Origin': 'https://www.binance.com',   // 🔥 增加 Origin
-          'Host': 'api.binance.com'             // 🔥 核心：指定 Host
+          'Referer': 'https://www.okx.com/' // 欧易需要这个 Referer
         }
       }
     );
 
-    // 3. 错误处理
+    // 3. 检查请求是否成功
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Binance Error:', response.status, errorText);
-      throw new Error(`Binance API Error: ${response.status}`);
+      throw new Error(`OKX API Error: ${response.status}`);
     }
 
-    // 4. 解析数据并返回给前端
-    const data = await response.json();
-    
+    const json = await response.json();
+
+    // 4. 🔥 修改点：欧易返回的数据在 data[0] 里
+    // 欧易的成功码是 "0"
+    if (json.code !== '0') {
+      throw new Error(json.msg || 'OKX returned error');
+    }
+
+    const d = json.data[0];
+
+    // 5. 返回给前端的数据
     res.status(200).json({
-      price: data.lastPrice,        // 最新价格
-      high: data.highPrice,         // 24h最高
-      low: data.lowPrice,           // 24h最低
-      change: data.priceChangePercent // 涨跌幅
+      price: d.last,           // 最新价格
+      high: d.high24h,         // 24小时最高
+      low: d.low24h,           // 24小时最低
+      change: d.sodUtc8         // 今日涨跌幅（UTC+8）
     });
 
   } catch (error) {
-    console.error('Server Error:', error);
-    // 如果出错，返回错误信息
+    console.error('Fetch DOGE price failed:', error);
     res.status(500).json({
       error: 'Failed to fetch price',
       message: error.message
