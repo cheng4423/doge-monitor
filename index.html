@@ -1,31 +1,404 @@
-<div style="background:#1a1f33; padding:20px; border-radius:10px; text-align:center;">
-  <h2>🎓 DOGE 交易学习系统</h2>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>DOGE 量化交易系统</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      background: #0a0e1a; 
+      color: white; 
+      font-family: 'Segoe UI', sans-serif;
+      padding: 20px;
+    }
+    .dashboard {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .card {
+      background: #161b33;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .price-card {
+      grid-column: 1 / -1;
+      background: linear-gradient(135deg, #1a1f33, #0f1329);
+      text-align: center;
+    }
+    .signal-card { grid-column: 1; }
+    .chart-card { grid-column: 2; }
+    .strategy-card { grid-column: 1; }
+    .control-card { grid-column: 2; }
+    .log-card { grid-column: 1 / -1; }
+    
+    .price-display {
+      font-size: 48px;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+    .change-positive { color: #00ff88; }
+    .change-negative { color: #ff6666; }
+    
+    .signal-box {
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+      margin: 10px 0;
+    }
+    .signal-buy { background: rgba(0, 255, 136, 0.1); border: 2px solid #00ff88; }
+    .signal-sell { background: rgba(255, 102, 102, 0.1); border: 2px solid #ff6666; }
+    .signal-hold { background: rgba(255, 204, 0, 0.1); border: 2px solid #ffcc00; }
+    
+    .strategy-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .strategy-item {
+      background: rgba(255,255,255,0.05);
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+    .strategy-good { border-left: 3px solid #00ff88; }
+    .strategy-bad { border-left: 3px solid #ff6666; }
+    .strategy-neutral { border-left: 3px solid #ffcc00; }
+    
+    button {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      margin: 5px;
+      transition: all 0.3s;
+    }
+    .btn-buy { background: #00cc66; color: white; }
+    .btn-sell { background: #ff4444; color: white; }
+    .btn-auto { background: #3366ff; color: white; }
+    .btn-stop { background: #ff9900; color: white; }
+    button:hover { transform: translateY(-2px); opacity: 0.9; }
+    
+    .log-container {
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    .log-item {
+      padding: 8px;
+      border-bottom: 1px solid #333;
+    }
+    .log-buy { color: #00ff88; }
+    .log-sell { color: #ff6666; }
+    .log-info { color: #4da3ff; }
+    .log-error { color: #ff6666; }
+  </style>
+</head>
+<body>
+  <h1 style="text-align:center; margin-bottom:20px;">🤖 DOGE 量化交易系统</h1>
   
-  <div style="display:flex; justify-content:space-around; margin:20px 0;">
-    <div>
-      <h3>💰 模拟账户</h3>
-      <div>余额: <span id="simBalance">10,000</span> USDT</div>
-      <div>DOGE: <span id="simDoge">0</span></div>
-      <div>总值: <span id="simTotal">10,000</span> USDT</div>
+  <div class="dashboard">
+    <!-- 价格卡片 -->
+    <div class="card price-card">
+      <h3>💰 DOGE-USDT 实时行情</h3>
+      <div class="price-display" id="price">0.0000</div>
+      <div id="change" class="change-positive">+0.00%</div>
+      <div style="margin-top:10px; font-size:14px; color:#aaa;">
+        24H: 高 <span id="high">--</span> | 低 <span id="low">--</span> | 量 <span id="volume">--</span>
+      </div>
     </div>
     
-    <div>
-      <h3>⚠️ 真实账户</h3>
-      <div style="color:#ff9900">余额: 10.00 USDT</div>
-      <div style="color:#ff6666; font-size:12px;">(资金不足，建议先学习)</div>
+    <!-- 信号卡片 -->
+    <div class="card signal-card">
+      <h3>🧠 AI 交易信号</h3>
+      <div id="signalBox" class="signal-box signal-hold">
+        <div id="signalText" style="font-size:20px; font-weight:bold;">等待分析...</div>
+        <div id="signalReason" style="color:#aaa; margin-top:5px; font-size:14px;">正在连接欧易API...</div>
+        <div id="signalConfidence" style="margin-top:10px;">信心: 0%</div>
+      </div>
+      <div style="margin-top:15px;">
+        <div>RSI: <span id="rsi">--</span></div>
+        <div>MA5/10: <span id="ma">--</span></div>
+        <div>成交量比: <span id="volRatio">--</span>x</div>
+      </div>
+    </div>
+    
+    <!-- 图表卡片 -->
+    <div class="card chart-card">
+      <h3>📈 价格曲线</h3>
+      <canvas id="priceChart" height="200"></canvas>
+    </div>
+    
+    <!-- 策略卡片 -->
+    <div class="card strategy-card">
+      <h3>🎯 量化策略</h3>
+      <div id="strategies" class="strategy-grid">
+        <div class="strategy-item strategy-neutral">MA策略: 计算中...</div>
+        <div class="strategy-item strategy-neutral">RSI策略: 计算中...</div>
+        <div class="strategy-item strategy-neutral">量价策略: 计算中...</div>
+        <div class="strategy-item strategy-neutral">突破策略: 计算中...</div>
+      </div>
+      <div style="margin-top:15px; font-size:12px; color:#aaa;">
+        综合评分: <span id="totalScore">0</span> | 活跃策略: <span id="activeStrategies">0</span>
+      </div>
+    </div>
+    
+    <!-- 控制卡片 -->
+    <div class="card control-card">
+      <h3>⚡ 交易控制</h3>
+      <div style="text-align:center; margin:15px 0;">
+        <button class="btn-buy" onclick="manualTrade('BUY')">📈 手动买入</button>
+        <button class="btn-sell" onclick="manualTrade('SELL')">📉 手动卖出</button>
+      </div>
+      <div style="text-align:center;">
+        <button class="btn-auto" onclick="startAutoTrading()">🚀 启动量化交易</button>
+        <button class="btn-stop" onclick="stopAutoTrading()">⏹️ 停止交易</button>
+      </div>
+      <div style="margin-top:15px; font-size:12px; color:#ffcc00;" id="modeIndicator">
+        当前模式: 模拟交易
+      </div>
+    </div>
+    
+    <!-- 日志卡片 -->
+    <div class="card log-card">
+      <h3>📊 交易日志</h3>
+      <div class="log-container" id="logContainer"></div>
+      <div style="margin-top:10px; font-size:12px; color:#aaa;">
+        总交易: <span id="totalTrades">0</span> | 持仓: <span id="positionsCount">0</span> | 今日: <span id="todayTrades">0</span>
+      </div>
     </div>
   </div>
   
-  <div id="signal" style="font-size:20px; padding:10px; background:#222; border-radius:8px;">
-    等待 AI 信号...
-  </div>
-  
-  <div style="margin:15px;">
-    <button onclick="learnTrade()" style="background:#3366ff;">📚 学习交易</button>
-    <button onclick="resetSim()" style="background:#ff9900;">🔄 重置模拟</button>
-  </div>
-  
-  <div style="color:#aaa; font-size:12px; margin-top:20px;">
-    💡 提示：用 10,000 模拟 USDT 学习，熟练后再考虑实盘
-  </div>
-</div>
+  <script>
+    // 全局变量
+    let priceChart = null;
+    let autoTrading = false;
+    let autoInterval = null;
+    let priceData = [];
+    let labels = [];
+    
+    // 初始化图表
+    function initChart() {
+      const ctx = document.getElementById('priceChart').getContext('2d');
+      priceChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'DOGE 价格',
+            data: priceData,
+            borderColor: '#4da3ff',
+            backgroundColor: 'rgba(77, 163, 255, 0.1)',
+            tension: 0.4,
+            fill: true,
+            pointRadius: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { display: false },
+            y: { 
+              grid: { color: '#222' },
+              ticks: { color: '#aaa', font: { size: 10 } }
+            }
+          }
+        }
+      });
+    }
+    
+    // 更新市场数据
+    async function updateMarket() {
+      try {
+        const res = await fetch('/api/doge?action=analyze');
+        const data = await res.json();
+        
+        if (!data.success) throw new Error(data.error);
+        
+        const analysis = data.analysis;
+        const market = analysis.raw || analysis.data;
+        
+        // 更新价格
+        const price = market.price || analysis.data.price;
+        const change = market.change || analysis.data.change;
+        
+        document.getElementById('price').textContent = price.toFixed(4);
+        const changeEl = document.getElementById('change');
+        changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+        changeEl.className = change >= 0 ? 'change-positive' : 'change-negative';
+        
+        // 更新其他指标
+        if (market.high) {
+          document.getElementById('high').textContent = market.high.toFixed(4);
+          document.getElementById('low').textContent = market.low.toFixed(4);
+          document.getElementById('volume').textContent = (market.vol / 10000).toFixed(0) + '万';
+        }
+        
+        document.getElementById('rsi').textContent = (market.rsi || analysis.data.rsi).toFixed(1);
+        document.getElementById('ma').textContent = 
+          `${(market.ma5 || analysis.data.ma5).toFixed(4)} / ${(market.ma10 || analysis.data.ma10).toFixed(4)}`;
+        document.getElementById('volRatio').textContent = (market.volumeRatio || analysis.data.volumeRatio).toFixed(1);
+        
+        // 更新信号
+        const signalBox = document.getElementById('signalBox');
+        const signalText = document.getElementById('signalText');
+        const signalReason = document.getElementById('signalReason');
+        const signalConfidence = document.getElementById('signalConfidence');
+        
+        signalBox.className = `signal-box signal-${analysis.action.toLowerCase()}`;
+        
+        if (analysis.action === 'BUY') {
+          signalText.innerHTML = '🎯 强烈买入信号';
+          signalText.style.color = '#00ff88';
+        } else if (analysis.action === 'SELL') {
+          signalText.innerHTML = '⚠️ 强烈卖出信号';
+          signalText.style.color = '#ff6666';
+        } else {
+          signalText.innerHTML = '⏳ 继续观望';
+          signalText.style.color = '#ffcc00';
+        }
+        
+        signalReason.textContent = analysis.reason;
+        signalConfidence.textContent = `信心: ${analysis.confidence}%`;
+        
+        // 更新策略显示
+        if (analysis.signals && analysis.signals.length > 0) {
+          const strategiesDiv = document.getElementById('strategies');
+          strategiesDiv.innerHTML = '';
+          
+          let totalScore = 0;
+          let activeCount = 0;
+          
+          analysis.signals.forEach(signal => {
+            const item = document.createElement('div');
+            item.className = `strategy-item ${
+              signal.score >= 50 ? 'strategy-good' : 
+              signal.score <= -40 ? 'strategy-bad' : 'strategy-neutral'
+            }`;
+            item.innerHTML = `${signal.name}: ${signal.score > 0 ? '+' : ''}${signal.score}`;
+            strategiesDiv.appendChild(item);
+            
+            totalScore += signal.score;
+            if (Math.abs(signal.score) >= 40) activeCount++;
+          });
+          
+          document.getElementById('totalScore').textContent = Math.round(totalScore / analysis.signals.length);
+          document.getElementById('activeStrategies').textContent = activeCount;
+        }
+        
+        // 更新图表
+        priceData.push(price);
+        labels.push(new Date().toLocaleTimeString().slice(0,5));
+        
+        if (priceData.length > 50) {
+          priceData.shift();
+          labels.shift();
+        }
+        
+        if (priceChart) priceChart.update();
+        
+        // 更新统计
+        if (data.stats) {
+          document.getElementById('totalTrades').textContent = data.stats.totalTrades;
+          document.getElementById('positionsCount').textContent = data.stats.positionsCount;
+          document.getElementById('todayTrades').textContent = data.stats.todayTrades;
+        }
+        
+        // 自动交易
+        if (autoTrading && analysis.action !== 'HOLD' && analysis.confidence > 60) {
+          executeTrade(analysis.action);
+        }
+        
+        addLog(`📈 价格更新: ${price.toFixed(4)} (${change >= 0 ? '+' : ''}${change.toFixed(2)}%)`, 'info');
+        
+      } catch (error) {
+        addLog(`❌ 更新失败: ${error.message}`, 'error');
+      }
+    }
+    
+    // 执行交易
+    async function executeTrade(action) {
+      try {
+        addLog(`🚀 执行${action === 'BUY' ? '买入' : '卖出'}...`, 'info');
+        
+        const res = await fetch(`/api/doge?action=trade&type=auto`);
+        const data = await res.json();
+        
+        if (data.success) {
+          addLog(
+            `✅ ${action === 'BUY' ? '买入' : '卖出'}成功! ${data.reason}`,
+            action.toLowerCase()
+          );
+        } else {
+          addLog(`❌ 交易失败: ${data.reason}`, 'error');
+        }
+      } catch (error) {
+        addLog(`❌ 交易错误: ${error.message}`, 'error');
+      }
+    }
+    
+    // 手动交易
+    async function manualTrade(action) {
+      if (!confirm(`确认${action === 'BUY' ? '买入' : '卖出'} DOGE？`)) return;
+      await executeTrade(action);
+    }
+    
+    // 启动自动交易
+    function startAutoTrading() {
+      if (!autoTrading) {
+        autoTrading = true;
+        autoInterval = setInterval(updateMarket, 5000); // 5秒更新一次
+        document.getElementById('modeIndicator').innerHTML = 
+          '🔴 <strong>自动交易已启动 (5秒/次)</strong>';
+        addLog('🚀 量化交易已启动', 'info');
+      }
+    }
+    
+    // 停止自动交易
+    function stopAutoTrading() {
+      if (autoTrading) {
+        autoTrading = false;
+        clearInterval(autoInterval);
+        document.getElementById('modeIndicator').innerHTML = 
+          '🟡 自动交易已停止';
+        addLog('⏹️ 量化交易已停止', 'info');
+      }
+    }
+    
+    // 添加日志
+    function addLog(message, type = 'info') {
+      const time = new Date().toLocaleTimeString();
+      const logItem = document.createElement('div');
+      logItem.className = `log-item log-${type}`;
+      logItem.innerHTML = `[${time}] ${message}`;
+      
+      const container = document.getElementById('logContainer');
+      container.prepend(logItem);
+      
+      // 限制日志数量
+      if (container.children.length > 50) {
+        container.removeChild(container.lastChild);
+      }
+    }
+    
+    // 页面加载
+    window.onload = () => {
+      initChart();
+      updateMarket();
+      setInterval(updateMarket, 10000); // 10秒更新一次
+      
+      addLog('🤖 DOGE量化交易系统已启动', 'info');
+      addLog('📡 连接欧易API...', 'info');
+    };
+  </script>
+</body>
+</html>
