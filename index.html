@@ -2,226 +2,143 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>DOGE AI 模拟交易</title>
+  <title>DOGE AI 实盘交易</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body {
-      background: #0b0f1c;
-      color: #fff;
-      font-family: sans-serif;
-      text-align: center;
-      padding: 20px;
-    }
-    button {
-      margin: 5px;
-      padding: 10px 16px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    .green { background:#00cc66; color:#fff; }
-    .red { background:#ff4444; color:#fff; }
-    .blue { background:#3366ff; color:#fff; }
-    .card {
-      background: #161b33;
-      padding: 15px;
-      border-radius: 12px;
-      margin: 15px auto;
-      max-width: 500px;
-    }
-    .signal-buy { color:#00ff88; }
-    .signal-sell { color:#ff6666; }
-    .signal-hold { color:#ffcc00; }
-    #signal { font-size: 24px; font-weight: bold; margin: 10px 0; }
-    #reason { font-size: 16px; color:#aaa; text-align: left; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; }
-    canvas { 
-      background: #0f1329; 
-      border-radius: 8px; 
-      margin-top: 10px;
-    }
+    body { background: #0a0e1a; color: #fff; font-family: sans-serif; text-align: center; padding: 20px; }
+    button { margin: 5px; padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; }
+    .red-btn { background: #ff4444; color: white; }
+    .green-btn { background: #00cc66; color: white; }
+    .blue-btn { background: #3366ff; color: white; }
+    .card { background: #161b33; padding: 15px; border-radius: 12px; margin: 15px auto; max-width: 500px; }
+    .signal-buy { color: #00ff88; font-weight: bold; }
+    .signal-sell { color: #ff6666; font-weight: bold; }
+    .signal-hold { color: #ffcc00; }
+    .danger { background: #330000; border: 1px solid #ff4444; padding: 10px; border-radius: 8px; margin: 10px 0; }
   </style>
 </head>
 <body>
 
-  <h1>🐶 DOGE AI 模拟交易</h1>
+  <h1>⚠️ DOGE AI 实盘交易系统</h1>
+  
+  <div class="danger">
+    <strong>高风险警告：</strong>这是实盘交易系统，可能造成真实资金损失！
+  </div>
 
-  <!-- 价格卡片 -->
   <div class="card">
     <h2 id="price">$--</h2>
-    <p id="change">涨幅: --%
+    <div>余额: <span id="balance">--</span> USDT</div>
+    <div>模式: <span id="mode" style="color:#ffcc00">DEMO</span></div>
   </div>
 
-  <!-- 曲线图 -->
   <div class="card">
-    <canvas id="chart" height="200"></canvas>
+    <canvas id="chart" height="150"></canvas>
   </div>
 
-  <!-- 🧠 AI 信号区 -->
   <div class="card">
-    <h3>🧠 AI 分析结果</h3>
-    <div id="signal" class="signal-hold">等待分析...</div>
-    <p id="reason">正在连接欧易 API...</p>
-    
-    <!-- 分析指标 -->
-    <div style="text-align:left; margin-top:10px; font-size:14px;">
-      <div>📈 24H涨跌幅: <span id="changeVal">--</span>%</div>
-      <div>📊 24H成交量: <span id="volume">--</span> 万</div>
-      <div>🎯 24H最高: <span id="high">--</span></div>
-      <div>🛡️ 24H最低: <span id="low">--</span></div>
-    </div>
+    <h3>🧠 AI 决策</h3>
+    <div id="signal" class="signal-hold">等待信号...</div>
+    <div id="reason" style="color:#aaa; font-size:14px; margin:10px 0;">--</div>
+    <div>信心指数: <span id="confidence">--</span>%</div>
   </div>
 
-  <!-- 控制面板 -->
   <div class="card">
-    <button class="blue" onclick="fetchAISignal()">🚀 获取 AI 信号</button>
-    <button class="green" onclick="execTrade()">📈 执行买入</button>
-    <button class="red" onclick="execSell()">📉 执行卖出</button>
+    <h3>⚡ 交易控制</h3>
+    <button class="blue-btn" onclick="analyze()">🔍 分析信号</button>
+    <button class="green-btn" onclick="autoTrade(true)">🤖 开启自动交易</button>
+    <button class="red-btn" onclick="autoTrade(false)">⏹️ 停止自动</button>
+    <button class="red-btn" onclick="manualTrade()">🚀 手动执行交易</button>
   </div>
 
-  <!-- 结果日志 -->
   <div class="card">
-    <h4>📋 交易日志</h4>
-    <div id="log"></div>
+    <h4>📊 交易日志</h4>
+    <div id="log" style="text-align:left; max-height: 200px; overflow-y: auto;"></div>
   </div>
 
   <script>
-    // 变量
-    let chart;
-    let priceHistory = [];
-    let labels = [];
-    let lastPrice = 0;
-    let autoRefresh = null;
-
-    // 1️⃣ 初始化图表
+    let chart, priceHistory = [], autoInterval = null;
+    
+    // 初始化图表
     function initChart() {
       const ctx = document.getElementById('chart').getContext('2d');
       chart = new Chart(ctx, {
         type: 'line',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'DOGE 价格',
-            data: priceHistory,
-            borderColor: '#4da3ff',
-            backgroundColor: 'rgba(77, 163, 255, 0.1)',
-            tension: 0.4,
-            fill: true
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: { legend: { display: false } },
-          scales: {
-            y: { beginAtZero: false, grid: { color: '#222' }, ticks: { color: '#aaa' } },
-            x: { grid: { display: false }, ticks: { color: '#aaa' } }
-          }
-        }
+        data: { labels: [], datasets: [{
+          label: '价格', data: [], borderColor: '#4da3ff', backgroundColor: 'rgba(77,163,255,0.1)', fill: true
+        }]},
+        options: { responsive: true, plugins: { legend: false } }
       });
     }
-
-    // 2️⃣ 获取价格和 AI 信号
-    async function updatePrice() {
+    
+    // 更新数据
+    async function analyze() {
       try {
-        const res = await fetch('/api/doge');
+        const res = await fetch('/api/doge?action=analyze');
         const data = await res.json();
         
-        if (!data.success) {
-          addLog('❌ API 错误: ' + data.error);
-          return;
-        }
-        
-        const p = data.price;
-        document.getElementById('price').innerText = '$' + p.toFixed(4);
-        
-        // 涨跌幅
-        document.getElementById('change').innerText = data.change + '%';
-        document.getElementById('change').style.color = data.change >= 0 ? '#00ff88' : '#ff6666';
-        
-        // 更新图表
-        if (priceHistory.length > 30) {
-          priceHistory.shift();
-          labels.shift();
-        }
-        priceHistory.push(p);
-        labels.push(new Date().toLocaleTimeString().slice(0,5));
-        chart.update();
-        
-        lastPrice = p;
-        
-      } catch (e) {
-        console.log('获取价格失败:', e);
-      }
-    }
-
-    // 3️⃣ 🧠 AI 信号分析
-    async function fetchAISignal() {
-      try {
-        const res = await fetch('/api/doge');
-        const data = await res.json();
-        
-        if (!data.success) {
-          addLog('❌ AI 分析失败: ' + data.error);
-          return;
-        }
+        document.getElementById('price').innerText = '$' + data.price.toFixed(4);
+        document.getElementById('balance').innerText = data.balance;
+        document.getElementById('mode').innerText = data.mode;
         
         const signalEl = document.getElementById('signal');
-        const reasonEl = document.getElementById('reason');
+        signalEl.innerText = data.signal === 'BUY' ? '🔴 买入信号' : 
+                            data.signal === 'SELL' ? '🟢 卖出信号' : '🟡 观望';
+        signalEl.className = data.signal === 'BUY' ? 'signal-buy' : 
+                            data.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
         
-        // ✅ 使用后端返回的真实信号
-        if (data.signal === 'BUY') {
-          signalEl.innerText = '🔴 强烈买入';
-          signalEl.className = 'signal-buy';
-        } else if (data.signal === 'SELL') {
-          signalEl.innerText = '🟢 建议卖出';
-          signalEl.className = 'signal-sell';
-        } else {
-          signalEl.innerText = '🟡 继续观望';
-          signalEl.className = 'signal-hold';
-        }
+        document.getElementById('reason').innerText = data.reason;
+        document.getElementById('confidence').innerText = data.confidence;
         
-        reasonEl.innerText = '💡 ' + data.reason;
+        // 更新图表
+        priceHistory.push(data.price);
+        if (priceHistory.length > 30) priceHistory.shift();
+        chart.data.datasets[0].data = priceHistory;
+        chart.update();
         
-        // 更新技术指标
-        document.getElementById('changeVal').innerText = data.change;
-        document.getElementById('volume').innerText = data.volume;
-        document.getElementById('high').innerText = data.high;
-        document.getElementById('low').innerText = data.low;
-        
-        addLog(`🧠 AI 信号: ${signalEl.innerText}`);
+        addLog(`分析: ${data.signal} - ${data.reason}`);
         
       } catch (e) {
-        addLog('❌ AI 分析失败: ' + e.message);
+        addLog('❌ 分析失败: ' + e.message);
       }
     }
-
-    // 4️⃣ 执行交易
-    async function execTrade() {
-      const price = document.getElementById('price').innerText;
-      addLog(`✅ 模拟买入 DOGE @ ${price}`);
+    
+    // 手动执行交易
+    async function manualTrade() {
+      if (!confirm('⚠️ 确认执行实盘交易？')) return;
+      const res = await fetch('/api/doge?action=trade');
+      const data = await res.json();
+      if (data.tradeResult?.success) {
+        addLog(`✅ 交易成功! 订单: ${data.tradeResult.orderId}`);
+      } else {
+        addLog(`❌ 交易失败: ${data.tradeResult?.error || '未知错误'}`);
+      }
     }
     
-    async function execSell() {
-      const price = document.getElementById('price').innerText;
-      addLog(`✅ 模拟卖出 DOGE @ ${price}`);
+    // 自动交易
+    async function autoTrade(start) {
+      if (autoInterval) clearInterval(autoInterval);
+      if (start) {
+        autoInterval = setInterval(async () => {
+          await analyze();
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          await manualTrade();
+        }, 10000); // 每10秒分析+交易一次
+        addLog('✅ 自动交易已启动 (10秒/次)');
+      } else {
+        addLog('⏹️ 自动交易已停止');
+      }
     }
-
-    // 5️⃣ 日志
+    
+    // 日志
     function addLog(msg) {
-      const logEl = document.getElementById('log');
       const time = new Date().toLocaleTimeString();
-      logEl.innerHTML = `<div>[${time}] ${msg}</div>` + logEl.innerHTML;
+      document.getElementById('log').innerHTML = 
+        `<div>[${time}] ${msg}</div>` + document.getElementById('log').innerHTML;
     }
-
-    // 6️⃣ 启动
-    initChart();
-    updatePrice(); // 立即更新一次
-    fetchAISignal(); // 立即分析一次
-    autoRefresh = setInterval(() => {
-      updatePrice();
-      fetchAISignal();
-    }, 8000); // 每8秒自动刷新
     
+    // 初始化
+    initChart();
+    analyze();
   </script>
 
 </body>
