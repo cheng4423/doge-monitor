@@ -1,33 +1,36 @@
 // api/doge.js
-// ✅ 最终修复版 - 解决 toFixed 报错 & 无法买入
+// ✅ 中文修复版（解决 undefined / 英文显示）
 import crypto from 'crypto';
 
-// ===== 1. 环境配置（Vercel 后台设置）=====
+// ===== 1. 环境配置 =====
 const API_KEY = process.env.OKX_API_KEY;
 const SECRET = process.env.OKX_API_SECRET;
 const PASSPHRASE = process.env.OKX_API_PASSPHRASE;
-const MODE = process.env.TRADE_MODE || 'DEMO'; // 默认 DEMO
+const MODE = process.env.TRADE_MODE || 'DEMO';
 const BASE = 'https://www.okx.com';
 
 // ===== 2. 交易参数 =====
-const TRADE_AMOUNT_USDT = 10;   // 每次10 USDT
-const BUY_CHANGE = -0.3;         // 跌0.3%就买（容易触发测试）
-const SELL_TARGET = 0.01;        // 涨1%就卖
-const STOP_LOSS = 0.005;         // 跌0.5%就割
+const TRADE_AMOUNT_USDT = 10;
+const BUY_CHANGE = -0.3;
+const SELL_TARGET = 0.01;
+const STOP_LOSS = 0.005;
 
-// ===== 3. 状态缓存 =====
+// ===== 3. 状态 =====
 let activePosition = null;
 
-// ===== 4. 欧易签名 =====
+// ===== 4. 签名 =====
 function sign(timestamp, method, path, body = '') {
-  return crypto.createHmac('sha256', SECRET).update(timestamp + method + path + body).digest('base64');
+  return crypto
+    .createHmac('sha256', SECRET)
+    .update(timestamp + method + path + body)
+    .digest('base64');
 }
 
 // ===== 5. 获取行情 =====
 async function getMarketData() {
   const res = await fetch(`${BASE}/api/v5/market/ticker?instId=DOGE-USDT`);
   const json = await res.json();
-  if (json.code !== '0') throw new Error('欧易行情失败: ' + json.msg);
+  if (json.code !== '0') throw new Error('获取行情失败');
   const t = json.data[0];
   return {
     price: Number(t.last),
@@ -35,67 +38,70 @@ async function getMarketData() {
   };
 }
 
-// ===== 6. AI 策略 =====
+// ===== 6. AI 策略（✅ 中文 + 防 undefined）=====
 async function analyzeSignal() {
   const { price, open } = await getMarketData();
   const change = ((price - open) / open) * 100;
-  let action = 'HOLD';
-  let reason = `波动 ${change.toFixed(2)}%，观望`;
 
-  // 有持仓：看止盈止损
+  let action = 'HOLD';
+  let reason = '波动正常，AI 选择观望';
+  let confidence = 0;
+
   if (activePosition) {
     const profit = (price - activePosition.price) / activePosition.price;
     if (profit >= SELL_TARGET) {
       action = 'SELL';
-      reason = `止盈 ${(profit * 100).toFixed(2)}%`;
+      reason = `达到止盈 ${(profit * 100).toFixed(2)}%`;
+      confidence = 80;
     } else if (profit <= -STOP_LOSS) {
       action = 'SELL';
-      reason = `止损 ${(profit * 100).toFixed(2)}%`;
+      reason = `触发止损 ${(profit * 100).toFixed(2)}%`;
+      confidence = 85;
+    } else {
+      reason = `持仓中，浮动 ${(profit * 100).toFixed(2)}%`;
+      confidence = 50;
     }
-  } 
-  // 无持仓：看买入机会
-  else if (change <= BUY_CHANGE) {
+  } else if (change <= BUY_CHANGE) {
     action = 'BUY';
-    reason = `跌幅 ${change.toFixed(2)}%，触发买入`;
+    reason = `下跌 ${change.toFixed(2)}%，AI 判定为买入机会`;
+    confidence = 75;
   }
 
-  return { action, reason, price, change };
+  return {
+    action,
+    reason,
+    confidence,
+    price,
+    change: Number(change.toFixed(2))
+  };
 }
 
-// ===== 7. 执行交易（核心修复）=====
+// ===== 7. 执行交易 =====
 async function executeTrade(side, price) {
-  // ✅ 修复1：强制转为数字
   const numPrice = Number(price);
-  
-  // ✅ 修复2：欧易 DOGE 现货必须是正整数
-  // 计算能买多少个 DOGE（向下取整，避免小数报错）
   const amount = Math.floor(TRADE_AMOUNT_USDT / numPrice);
 
-  // 防御性检查：如果钱太少买不到1个，直接返回失败
   if (amount <= 0) {
-    return { success: false, error: '金额太小，无法购买至少1个DOGE' };
+    return { success: false, error: '金额太小，无法购买' };
   }
 
-  // ✅ DEMO 模式（模拟盘）
   if (MODE === 'DEMO') {
     return {
       success: true,
       demo: true,
-      orderId: `DEMO_${Date.now()}`,
       side,
       price: numPrice.toFixed(6),
-      amount: amount
+      amount
     };
   }
 
-  // ✅ 实盘模式
   const path = '/api/v5/trade/order';
   const body = JSON.stringify({
     instId: 'DOGE-USDT',
     tdMode: 'cash',
     side: side.toLowerCase(),
     ordType: 'market',
-    sz: amount.toString() // 必须是字符串
+    sz: amount.toString()
   });
 
   const ts = new Date().toISOString();
@@ -112,41 +118,59 @@ async function executeTrade(side, price) {
 
   if (data.code === '0') {
     return { success: true, orderId: data.data[0].ordId, amount };
-  } else {
-    return { success: false, error: data.msg };
   }
+  return { success: false, error: data.msg };
 }
 
 // ===== 8. 主入口 =====
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  
+
   try {
     const { action } = req.query;
     const signal = await analyzeSignal();
 
-    // 手动/自动 买入
-    if ((action === 'buy' || action === 'auto') && signal.action === 'BUY' && !activePosition) {
+    // ✅ 默认：防止 undefined
+    if (signal.confidence === undefined) signal.confidence = 0;
+    if (signal.reason === undefined) signal.reason = 'AI 分析中...';
+
+    if (action === 'buy' && signal.action === 'BUY' && !activePosition) {
       const result = await executeTrade('BUY', signal.price);
-      if (result.success) {
-        activePosition = { price: signal.price, amount: result.amount };
-      }
+      if (result.success) activePosition = { price: signal.price, amount: result.amount };
       return res.json({ success: result.success, mode: MODE, action: 'BUY', result });
     }
 
-    // 手动/自动 卖出
-    if ((action === 'sell' || action === 'auto') && signal.action === 'SELL' && activePosition) {
+    if (action === 'sell' && signal.action === 'SELL' && activePosition) {
       const result = await executeTrade('SELL', signal.price);
-      if (result.success) {
-        activePosition = null;
-      }
+      if (result.success) activePosition = null;
       return res.json({ success: result.success, mode: MODE, action: 'SELL', result });
     }
 
-    // 仅分析
-    res.json({ success: true, mode: MODE, ...signal });
+    if (action === 'auto') {
+      let result = null;
+      if (signal.action === 'BUY' && !activePosition) {
+        result = await executeTrade('BUY', signal.price);
+        if (result.success) activePosition = { price: signal.price, amount: result.amount };
+      }
+      if (signal.action === 'SELL' && activePosition) {
+        result = await executeTrade('SELL', signal.price);
+        if (result.success) activePosition = null;
+      }
+      return res.json({ success: true, mode: MODE, action: signal.action, reason: signal.reason, confidence: signal.confidence });
+    }
+
+    res.json({
+      success: true,
+      mode: MODE,
+      action: signal.action,
+      reason: signal.reason,
+      confidence: signal.confidence
+    });
 
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message || '系统错误'
+    });
   }
 }
