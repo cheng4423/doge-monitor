@@ -1,17 +1,26 @@
 // api/doge.js
+// ✅ 已加入 Headers，解决 Binance 403 Forbidden
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
   try {
+    const options = {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.google.com/'
+      }
+    };
+
     const response = await fetch(
-      'https://api.binance.com/api/v3/ticker/24hr?symbol=DOGEUSDT'
+      'https://api.binance.com/api/v3/ticker/24hr?symbol=DOGEUSDT',
+      options
     );
 
-    // 修正：这里必须是小写的 ok
     if (!response.ok) {
-      // 抛出具体的错误状态码，方便排查
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`Binance API error: ${response.status}`);
     }
 
     const data = await response.json();
