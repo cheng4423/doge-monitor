@@ -1,17 +1,17 @@
 // api/doge.js
-// ✅ 最终修复版 - 解决 toFixed 报错 & 无法买卖
+// ✅ 最终修复版 - 解决 toFixed 报错 & 无法买入
 import crypto from 'crypto';
 
-// ===== 1. 环境配置 =====
+// ===== 1. 环境配置（Vercel 后台设置）=====
 const API_KEY = process.env.OKX_API_KEY;
 const SECRET = process.env.OKX_API_SECRET;
 const PASSPHRASE = process.env.OKX_API_PASSPHRASE;
-const MODE = process.env.TRADE_MODE || 'DEMO';
+const MODE = process.env.TRADE_MODE || 'DEMO'; // 默认 DEMO
 const BASE = 'https://www.okx.com';
 
 // ===== 2. 交易参数 =====
 const TRADE_AMOUNT_USDT = 10;   // 每次10 USDT
-const BUY_CHANGE = -0.3;         // 跌0.3%就买（更容易触发测试）
+const BUY_CHANGE = -0.3;         // 跌0.3%就买（容易触发测试）
 const SELL_TARGET = 0.01;        // 涨1%就卖
 const STOP_LOSS = 0.005;         // 跌0.5%就割
 
@@ -28,7 +28,6 @@ async function getMarketData() {
   const res = await fetch(`${BASE}/api/v5/market/ticker?instId=DOGE-USDT`);
   const json = await res.json();
   if (json.code !== '0') throw new Error('欧易行情失败: ' + json.msg);
-  
   const t = json.data[0];
   return {
     price: Number(t.last),
@@ -43,7 +42,7 @@ async function analyzeSignal() {
   let action = 'HOLD';
   let reason = `波动 ${change.toFixed(2)}%，观望`;
 
-  // 如果有持仓，看止盈止损
+  // 有持仓：看止盈止损
   if (activePosition) {
     const profit = (price - activePosition.price) / activePosition.price;
     if (profit >= SELL_TARGET) {
@@ -52,11 +51,9 @@ async function analyzeSignal() {
     } else if (profit <= -STOP_LOSS) {
       action = 'SELL';
       reason = `止损 ${(profit * 100).toFixed(2)}%`;
-    } else {
-      reason = `持仓中，浮盈 ${(profit * 100).toFixed(2)}%`;
     }
   } 
-  // 如果没持仓，看买入机会
+  // 无持仓：看买入机会
   else if (change <= BUY_CHANGE) {
     action = 'BUY';
     reason = `跌幅 ${change.toFixed(2)}%，触发买入`;
@@ -65,18 +62,21 @@ async function analyzeSignal() {
   return { action, reason, price, change };
 }
 
-// ===== 7. 执行交易（修复核心）=====
+// ===== 7. 执行交易（核心修复）=====
 async function executeTrade(side, price) {
-  // ✅ 修复点1：强制转为数字，防止 toFixed 报错
+  // ✅ 修复1：强制转为数字
   const numPrice = Number(price);
-  // ✅ 修复点2：欧易 DOGE 必须是正整数
-  const amount = Math.floor(TRADE_AMOUNT_USDT / numPrice); 
+  
+  // ✅ 修复2：欧易 DOGE 现货必须是正整数
+  // 计算能买多少个 DOGE（向下取整，避免小数报错）
+  const amount = Math.floor(TRADE_AMOUNT_USDT / numPrice);
 
+  // 防御性检查：如果钱太少买不到1个，直接返回失败
   if (amount <= 0) {
-    return { success: false, error: '金额太小，计算出的数量为0' };
+    return { success: false, error: '金额太小，无法购买至少1个DOGE' };
   }
 
-  // DEMO 模式直接返回成功
+  // ✅ DEMO 模式（模拟盘）
   if (MODE === 'DEMO') {
     return {
       success: true,
@@ -88,7 +88,7 @@ async function executeTrade(side, price) {
     };
   }
 
-  // 实盘下单
+  // ✅ 实盘模式
   const path = '/api/v5/trade/order';
   const body = JSON.stringify({
     instId: 'DOGE-USDT',
@@ -107,7 +107,7 @@ async function executeTrade(side, price) {
     'OK-ACCESS-PASSPHRASE': PASSPHRASE
   };
 
-  const res = await fetch(BASE + path, { method: 'POST', headers, body: JSON.stringify(body) });
+  const res = await fetch(BASE + path, { method: 'POST', headers, body });
   const data = await res.json();
 
   if (data.code === '0') {
@@ -123,12 +123,10 @@ export default async function handler(req, res) {
   
   try {
     const { action } = req.query;
-
-    // 1. 分析信号
     const signal = await analyzeSignal();
 
-    // 2. 执行买入
-    if (action === 'buy' && signal.action === 'BUY' && !activePosition) {
+    // 手动/自动 买入
+    if ((action === 'buy' || action === 'auto') && signal.action === 'BUY' && !activePosition) {
       const result = await executeTrade('BUY', signal.price);
       if (result.success) {
         activePosition = { price: signal.price, amount: result.amount };
@@ -136,8 +134,8 @@ export default async function handler(req, res) {
       return res.json({ success: result.success, mode: MODE, action: 'BUY', result });
     }
 
-    // 3. 执行卖出
-    if (action === 'sell' && activePosition) {
+    // 手动/自动 卖出
+    if ((action === 'sell' || action === 'auto') && signal.action === 'SELL' && activePosition) {
       const result = await executeTrade('SELL', signal.price);
       if (result.success) {
         activePosition = null;
@@ -145,21 +143,7 @@ export default async function handler(req, res) {
       return res.json({ success: result.success, mode: MODE, action: 'SELL', result });
     }
 
-    // 4. 自动交易
-    if (action === 'auto') {
-      let result = null;
-      if (signal.action === 'BUY' && !activePosition) {
-        result = await executeTrade('BUY', signal.price);
-        if (result.success) activePosition = { price: signal.price, amount: result.amount };
-      }
-      if (signal.action === 'SELL' && activePosition) {
-        result = await executeTrade('SELL', signal.price);
-        if (result.success) activePosition = null;
-      }
-      return res.json({ success: true, mode: MODE, action: signal.action, reason: signal.reason, result });
-    }
-
-    // 5. 仅分析
+    // 仅分析
     res.json({ success: true, mode: MODE, ...signal });
 
   } catch (error) {
