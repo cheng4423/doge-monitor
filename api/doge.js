@@ -1,264 +1,168 @@
 // api/doge.js
-// ⚠️ 实盘自动交易系统 - 连接欧易
+// ✅ 最终修复版 - 解决 toFixed 报错 & 无法买卖
 import crypto from 'crypto';
 
-// 环境变量（在Vercel中设置）
+// ===== 1. 环境配置 =====
 const API_KEY = process.env.OKX_API_KEY;
 const SECRET = process.env.OKX_API_SECRET;
 const PASSPHRASE = process.env.OKX_API_PASSPHRASE;
-const TRADE_MODE = process.env.TRADE_MODE || 'DEMO'; // DEMO 或 REAL
+const MODE = process.env.TRADE_MODE || 'DEMO';
 const BASE = 'https://www.okx.com';
 
-// 🎯 交易参数（按你的要求：每单盈利1元）
-const TRADE_AMOUNT = 10;       // 每次10 USDT
-const TARGET_PROFIT = 0.02;    // 目标盈利率2%（约0.2元）
-const STOP_LOSS = 0.01;        // 止损1%
-const FEE_RATE = 0.001;        // 手续费0.1%
+// ===== 2. 交易参数 =====
+const TRADE_AMOUNT_USDT = 10;   // 每次10 USDT
+const BUY_CHANGE = -0.3;         // 跌0.3%就买（更容易触发测试）
+const SELL_TARGET = 0.01;        // 涨1%就卖
+const STOP_LOSS = 0.005;         // 跌0.5%就割
 
-// 全局状态
-let activePosition = null;     // 当前持仓
-let tradeHistory = [];         // 交易记录
+// ===== 3. 状态缓存 =====
+let activePosition = null;
 
-// 🔐 欧易签名
+// ===== 4. 欧易签名 =====
 function sign(timestamp, method, path, body = '') {
-  const message = timestamp + method + path + body;
-  return crypto.createHmac('sha256', SECRET).update(message).digest('base64');
+  return crypto.createHmac('sha256', SECRET).update(timestamp + method + path + body).digest('base64');
 }
 
-// 📈 获取欧易实时数据
+// ===== 5. 获取行情 =====
 async function getMarketData() {
-  const response = await fetch(`${BASE}/api/v5/market/ticker?instId=DOGE-USDT`);
-  const data = await response.json();
+  const res = await fetch(`${BASE}/api/v5/market/ticker?instId=DOGE-USDT`);
+  const json = await res.json();
+  if (json.code !== '0') throw new Error('欧易行情失败: ' + json.msg);
   
-  if (data.code !== '0') throw new Error(data.msg);
-  
-  const ticker = data.data[0];
+  const t = json.data[0];
   return {
-    price: parseFloat(ticker.last),
-    open: parseFloat(ticker.open24h),
-    high: parseFloat(ticker.high24h),
-    low: parseFloat(ticker.low24h),
-    vol: parseFloat(ticker.vol24h)
+    price: Number(t.last),
+    open: Number(t.open24h)
   };
 }
 
-// 🧠 AI量化分析
+// ===== 6. AI 策略 =====
 async function analyzeSignal() {
-  const data = await getMarketData();
-  const change = ((data.price - data.open) / data.open) * 100;
-  
+  const { price, open } = await getMarketData();
+  const change = ((price - open) / open) * 100;
   let action = 'HOLD';
-  let reason = '';
-  let confidence = 0;
-  
-  // 策略1：跌抄底
-  if (change <= -1.5) {
-    action = 'BUY';
-    confidence = 75;
-    reason = `下跌 ${change.toFixed(2)}%，AI判定超卖`;
-  }
-  // 策略2：涨止盈
-  else if (change >= 2.0) {
-    action = 'SELL';
-    confidence = 70;
-    reason = `上涨 ${change.toFixed(2)}%，建议止盈`;
-  }
-  // 策略3：持仓检查
-  else if (activePosition) {
-    const profit = (data.price - activePosition.price) / activePosition.price;
-    
-    if (profit >= TARGET_PROFIT) {
+  let reason = `波动 ${change.toFixed(2)}%，观望`;
+
+  // 如果有持仓，看止盈止损
+  if (activePosition) {
+    const profit = (price - activePosition.price) / activePosition.price;
+    if (profit >= SELL_TARGET) {
       action = 'SELL';
-      reason = `达到止盈 ${(profit*100).toFixed(2)}%`;
+      reason = `止盈 ${(profit * 100).toFixed(2)}%`;
     } else if (profit <= -STOP_LOSS) {
       action = 'SELL';
-      reason = `触发止损 ${(profit*100).toFixed(2)}%`;
+      reason = `止损 ${(profit * 100).toFixed(2)}%`;
     } else {
-      action = 'HOLD';
-      reason = `持仓中，浮动 ${(profit*100).toFixed(2)}%`;
+      reason = `持仓中，浮盈 ${(profit * 100).toFixed(2)}%`;
     }
+  } 
+  // 如果没持仓，看买入机会
+  else if (change <= BUY_CHANGE) {
+    action = 'BUY';
+    reason = `跌幅 ${change.toFixed(2)}%，触发买入`;
   }
-  // 策略4：横盘观望
-  else {
-    action = 'HOLD';
-    reason = `波动 ${change.toFixed(2)}%，等待机会`;
-  }
-  
-  return {
-    action,
-    reason,
-    confidence,
-    price: data.price,
-    change: change.toFixed(2)
-  };
+
+  return { action, reason, price, change };
 }
 
-// 💰 执行交易
-async function executeTrade(side, price, amount) {
-  if (TRADE_MODE === 'DEMO') {
+// ===== 7. 执行交易（修复核心）=====
+async function executeTrade(side, price) {
+  // ✅ 修复点1：强制转为数字，防止 toFixed 报错
+  const numPrice = Number(price);
+  // ✅ 修复点2：欧易 DOGE 必须是正整数
+  const amount = Math.floor(TRADE_AMOUNT_USDT / numPrice); 
+
+  if (amount <= 0) {
+    return { success: false, error: '金额太小，计算出的数量为0' };
+  }
+
+  // DEMO 模式直接返回成功
+  if (MODE === 'DEMO') {
     return {
       success: true,
       demo: true,
       orderId: `DEMO_${Date.now()}`,
       side,
-      price: price.toFixed(6),
-      amount: amount.toFixed(0)
+      price: numPrice.toFixed(6),
+      amount: amount
     };
   }
-  
-  const timestamp = new Date().toISOString();
+
+  // 实盘下单
   const path = '/api/v5/trade/order';
   const body = JSON.stringify({
     instId: 'DOGE-USDT',
     tdMode: 'cash',
     side: side.toLowerCase(),
     ordType: 'market',
-    sz: Math.floor(amount).toString()
+    sz: amount.toString() // 必须是字符串
   });
-  
-  try {
-    const response = await fetch(BASE + path, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'OK-ACCESS-KEY': API_KEY,
-        'OK-ACCESS-SIGN': sign(timestamp, 'POST', path, body),
-        'OK-ACCESS-TIMESTAMP': timestamp,
-        'OK-ACCESS-PASSPHRASE': PASSPHRASE
-      },
-      body
-    });
-    
-    const data = await response.json();
-    
-    if (data.code === '0') {
-      return {
-        success: true,
-        orderId: data.data[0].ordId,
-        side,
-        price: price.toFixed(6),
-        amount: amount.toFixed(0)
-      };
-    } else {
-      return { success: false, error: data.msg };
-    }
-  } catch (err) {
-    return { success: false, error: err.message };
+
+  const ts = new Date().toISOString();
+  const headers = {
+    'Content-Type': 'application/json',
+    'OK-ACCESS-KEY': API_KEY,
+    'OK-ACCESS-SIGN': sign(ts, 'POST', path, body),
+    'OK-ACCESS-TIMESTAMP': ts,
+    'OK-ACCESS-PASSPHRASE': PASSPHRASE
+  };
+
+  const res = await fetch(BASE + path, { method: 'POST', headers, body: JSON.stringify(body) });
+  const data = await res.json();
+
+  if (data.code === '0') {
+    return { success: true, orderId: data.data[0].ordId, amount };
+  } else {
+    return { success: false, error: data.msg };
   }
 }
 
-// 🎯 主函数
+// ===== 8. 主入口 =====
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json');
-  
-  const { action = 'analyze' } = req.query;
   
   try {
-    if (action === 'analyze') {
-      // 获取分析信号
-      const signal = await analyzeSignal();
-      
-      res.status(200).json({
-        success: true,
-        mode: TRADE_MODE,
-        ...signal,
-        hasPosition: !!activePosition,
-        position: activePosition
-      });
-      
-    } else if (action === 'buy') {
-      // 手动买入
-      const signal = await analyzeSignal();
-      const amount = (TRADE_AMOUNT / signal.price).toFixed(0);
-      
-      const result = await executeTrade('BUY', signal.price, amount);
-      
+    const { action } = req.query;
+
+    // 1. 分析信号
+    const signal = await analyzeSignal();
+
+    // 2. 执行买入
+    if (action === 'buy' && signal.action === 'BUY' && !activePosition) {
+      const result = await executeTrade('BUY', signal.price);
       if (result.success) {
-        activePosition = {
-          price: signal.price,
-          amount: parseFloat(amount),
-          time: Date.now()
-        };
+        activePosition = { price: signal.price, amount: result.amount };
       }
-      
-      res.status(200).json({
-        success: result.success,
-        mode: TRADE_MODE,
-        action: 'BUY',
-        result,
-        position: activePosition
-      });
-      
-    } else if (action === 'sell') {
-      // 手动卖出
-      if (!activePosition) {
-        return res.status(400).json({ success: false, error: '无持仓' });
-      }
-      
-      const data = await getMarketData();
-      const result = await executeTrade('SELL', data.price, activePosition.amount);
-      
+      return res.json({ success: result.success, mode: MODE, action: 'BUY', result });
+    }
+
+    // 3. 执行卖出
+    if (action === 'sell' && activePosition) {
+      const result = await executeTrade('SELL', signal.price);
       if (result.success) {
         activePosition = null;
       }
-      
-      res.status(200).json({
-        success: result.success,
-        mode: TRADE_MODE,
-        action: 'SELL',
-        result
-      });
-      
-    } else if (action === 'auto') {
-      // 自动交易
-      const signal = await analyzeSignal();
-      let result = null;
-      
-      if (signal.action === 'BUY' && !activePosition) {
-        const amount = (TRADE_AMOUNT / signal.price).toFixed(0);
-        result = await executeTrade('BUY', signal.price, amount);
-        
-        if (result.success) {
-          activePosition = {
-            price: signal.price,
-            amount: parseFloat(amount),
-            time: Date.now()
-          };
-        }
-      } 
-      else if (signal.action === 'SELL' && activePosition) {
-        result = await executeTrade('SELL', signal.price, activePosition.amount);
-        
-        if (result.success) {
-          const profit = (signal.price - activePosition.price) * activePosition.amount;
-          tradeHistory.push({
-            buy: activePosition.price,
-            sell: signal.price,
-            profit: profit.toFixed(4),
-            time: Date.now()
-          });
-          activePosition = null;
-        }
-      }
-      
-      res.status(200).json({
-        success: true,
-        mode: TRADE_MODE,
-        action: signal.action,
-        reason: signal.reason,
-        result
-      });
-      
-    } else {
-      res.status(400).json({ success: false, error: '未知操作' });
+      return res.json({ success: result.success, mode: MODE, action: 'SELL', result });
     }
-    
+
+    // 4. 自动交易
+    if (action === 'auto') {
+      let result = null;
+      if (signal.action === 'BUY' && !activePosition) {
+        result = await executeTrade('BUY', signal.price);
+        if (result.success) activePosition = { price: signal.price, amount: result.amount };
+      }
+      if (signal.action === 'SELL' && activePosition) {
+        result = await executeTrade('SELL', signal.price);
+        if (result.success) activePosition = null;
+      }
+      return res.json({ success: true, mode: MODE, action: signal.action, reason: signal.reason, result });
+    }
+
+    // 5. 仅分析
+    res.json({ success: true, mode: MODE, ...signal });
+
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message,
-      mode: TRADE_MODE
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 }
