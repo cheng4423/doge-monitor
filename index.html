@@ -1,145 +1,31 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <title>DOGE AI 实盘交易</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body { background: #0a0e1a; color: #fff; font-family: sans-serif; text-align: center; padding: 20px; }
-    button { margin: 5px; padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; }
-    .red-btn { background: #ff4444; color: white; }
-    .green-btn { background: #00cc66; color: white; }
-    .blue-btn { background: #3366ff; color: white; }
-    .card { background: #161b33; padding: 15px; border-radius: 12px; margin: 15px auto; max-width: 500px; }
-    .signal-buy { color: #00ff88; font-weight: bold; }
-    .signal-sell { color: #ff6666; font-weight: bold; }
-    .signal-hold { color: #ffcc00; }
-    .danger { background: #330000; border: 1px solid #ff4444; padding: 10px; border-radius: 8px; margin: 10px 0; }
-  </style>
-</head>
-<body>
-
-  <h1>⚠️ DOGE AI 实盘交易系统</h1>
+<div style="background:#1a1f33; padding:20px; border-radius:10px; text-align:center;">
+  <h2>🎓 DOGE 交易学习系统</h2>
   
-  <div class="danger">
-    <strong>高风险警告：</strong>这是实盘交易系统，可能造成真实资金损失！
-  </div>
-
-  <div class="card">
-    <h2 id="price">$--</h2>
-    <div>余额: <span id="balance">--</span> USDT</div>
-    <div>模式: <span id="mode" style="color:#ffcc00">DEMO</span></div>
-  </div>
-
-  <div class="card">
-    <canvas id="chart" height="150"></canvas>
-  </div>
-
-  <div class="card">
-    <h3>🧠 AI 决策</h3>
-    <div id="signal" class="signal-hold">等待信号...</div>
-    <div id="reason" style="color:#aaa; font-size:14px; margin:10px 0;">--</div>
-    <div>信心指数: <span id="confidence">--</span>%</div>
-  </div>
-
-  <div class="card">
-    <h3>⚡ 交易控制</h3>
-    <button class="blue-btn" onclick="analyze()">🔍 分析信号</button>
-    <button class="green-btn" onclick="autoTrade(true)">🤖 开启自动交易</button>
-    <button class="red-btn" onclick="autoTrade(false)">⏹️ 停止自动</button>
-    <button class="red-btn" onclick="manualTrade()">🚀 手动执行交易</button>
-  </div>
-
-  <div class="card">
-    <h4>📊 交易日志</h4>
-    <div id="log" style="text-align:left; max-height: 200px; overflow-y: auto;"></div>
-  </div>
-
-  <script>
-    let chart, priceHistory = [], autoInterval = null;
+  <div style="display:flex; justify-content:space-around; margin:20px 0;">
+    <div>
+      <h3>💰 模拟账户</h3>
+      <div>余额: <span id="simBalance">10,000</span> USDT</div>
+      <div>DOGE: <span id="simDoge">0</span></div>
+      <div>总值: <span id="simTotal">10,000</span> USDT</div>
+    </div>
     
-    // 初始化图表
-    function initChart() {
-      const ctx = document.getElementById('chart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: { labels: [], datasets: [{
-          label: '价格', data: [], borderColor: '#4da3ff', backgroundColor: 'rgba(77,163,255,0.1)', fill: true
-        }]},
-        options: { responsive: true, plugins: { legend: false } }
-      });
-    }
-    
-    // 更新数据
-    async function analyze() {
-      try {
-        const res = await fetch('/api/doge?action=analyze');
-        const data = await res.json();
-        
-        document.getElementById('price').innerText = '$' + data.price.toFixed(4);
-        document.getElementById('balance').innerText = data.balance;
-        document.getElementById('mode').innerText = data.mode;
-        
-        const signalEl = document.getElementById('signal');
-        signalEl.innerText = data.signal === 'BUY' ? '🔴 买入信号' : 
-                            data.signal === 'SELL' ? '🟢 卖出信号' : '🟡 观望';
-        signalEl.className = data.signal === 'BUY' ? 'signal-buy' : 
-                            data.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
-        
-        document.getElementById('reason').innerText = data.reason;
-        document.getElementById('confidence').innerText = data.confidence;
-        
-        // 更新图表
-        priceHistory.push(data.price);
-        if (priceHistory.length > 30) priceHistory.shift();
-        chart.data.datasets[0].data = priceHistory;
-        chart.update();
-        
-        addLog(`分析: ${data.signal} - ${data.reason}`);
-        
-      } catch (e) {
-        addLog('❌ 分析失败: ' + e.message);
-      }
-    }
-    
-    // 手动执行交易
-    async function manualTrade() {
-      if (!confirm('⚠️ 确认执行实盘交易？')) return;
-      const res = await fetch('/api/doge?action=trade');
-      const data = await res.json();
-      if (data.tradeResult?.success) {
-        addLog(`✅ 交易成功! 订单: ${data.tradeResult.orderId}`);
-      } else {
-        addLog(`❌ 交易失败: ${data.tradeResult?.error || '未知错误'}`);
-      }
-    }
-    
-    // 自动交易
-    async function autoTrade(start) {
-      if (autoInterval) clearInterval(autoInterval);
-      if (start) {
-        autoInterval = setInterval(async () => {
-          await analyze();
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await manualTrade();
-        }, 10000); // 每10秒分析+交易一次
-        addLog('✅ 自动交易已启动 (10秒/次)');
-      } else {
-        addLog('⏹️ 自动交易已停止');
-      }
-    }
-    
-    // 日志
-    function addLog(msg) {
-      const time = new Date().toLocaleTimeString();
-      document.getElementById('log').innerHTML = 
-        `<div>[${time}] ${msg}</div>` + document.getElementById('log').innerHTML;
-    }
-    
-    // 初始化
-    initChart();
-    analyze();
-  </script>
-
-</body>
-</html>
+    <div>
+      <h3>⚠️ 真实账户</h3>
+      <div style="color:#ff9900">余额: 10.00 USDT</div>
+      <div style="color:#ff6666; font-size:12px;">(资金不足，建议先学习)</div>
+    </div>
+  </div>
+  
+  <div id="signal" style="font-size:20px; padding:10px; background:#222; border-radius:8px;">
+    等待 AI 信号...
+  </div>
+  
+  <div style="margin:15px;">
+    <button onclick="learnTrade()" style="background:#3366ff;">📚 学习交易</button>
+    <button onclick="resetSim()" style="background:#ff9900;">🔄 重置模拟</button>
+  </div>
+  
+  <div style="color:#aaa; font-size:12px; margin-top:20px;">
+    💡 提示：用 10,000 模拟 USDT 学习，熟练后再考虑实盘
+  </div>
+</div>
