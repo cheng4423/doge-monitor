@@ -8,10 +8,14 @@ const PASSPHRASE = process.env.OKX_API_PASSPHRASE;
 const BASE = 'https://www.okx.com';
 
 /* ========= 交易参数 ========= */
-const MIN_DOGE = 10;       // OKX 最小下单数量
-const BUFFER_RATIO = 0.95; // 使用 95% 余额，留 5% 手续费缓冲
-const TAKE_PROFIT = 0.03;  // 3% 止盈
-const STOP_LOSS = -0.02;   // 2% 止损
+const MIN_DOGE = 10;
+const BUFFER_RATIO = 0.95;
+const TAKE_PROFIT = 0.03;
+const STOP_LOSS = -0.02;
+
+/* ========= 量化开关 ========= */
+let QUANT_ENABLED = false;
+let LAST_QUANT_CHECK = 0;
 
 /* ========= OKX 签名 ========= */
 function sign(ts, method, path, body = '') {
@@ -45,18 +49,32 @@ async function okxRequest(method, path, body = '') {
   return res.json();
 }
 
+/* ========= 获取余额 ========= */
+async function getAvailableBalance(ccy) {
+  try {
+    const [fundingRes, tradeRes] = await Promise.all([
+      okxRequest('GET', `/api/v5/asset/balances?ccy=${ccy}`),
+      okxRequest('GET', `/api/v5/account/balance?ccy=${ccy}`)
+    ]);
+
+    let total = 0;
+    if (fundingRes.code === '0' && fundingRes.data?.[0]) {
+      total += Number(fundingRes.data[0].availBal || 0);
+    }
+    if (tradeRes.code === '0' && tradeRes.data?.[0]) {
+      total += Number(tradeRes.data[0]?.details?.[0]?.availBal || 0);
+    }
+    return total;
+  } catch (err) {
+    return 0;
+  }
+}
+
 /* ========= 获取价格 ========= */
 async function getMarketPrice() {
   const json = await okxRequest('GET', '/api/v5/market/ticker?instId=DOGE-USDT');
   if (json.code !== '0') throw new Error(json.msg);
   return Number(json.data[0].last);
-}
-
-/* ========= 获取余额 ========= */
-async function getAvailableBalance(ccy) {
-  const json = await okxRequest('GET', `/api/v5/account/balance?ccy=${ccy}`);
-  if (json.code !== '0') return 0;
-  return Number(json.data[0]?.details?.[0]?.availBal || 0);
 }
 
 /* ========= 真实持仓 ========= */
@@ -67,49 +85,26 @@ async function getRealPosition() {
   return pos ? { amount: Number(pos.pos), avgPrice: Number(pos.avgPx) } : null;
 }
 
-/* ========= ✅ 动态计算下单数量 ========= */
+/* ========= 计算下单数量 ========= */
 async function calculateTradeAmount(side, price) {
   if (side === 'BUY') {
-    // 获取 USDT 余额
     const usdtBalance = await getAvailableBalance('USDT');
-    if (usdtBalance <= 0) {
-      throw new Error(`❌ USDT 余额不足 (当前: ${usdtBalance.toFixed(2)} USDT)`);
-    }
+    if (usdtBalance <= 0) throw new Error(`❌ USDT 余额不足 (当前: ${usdtBalance.toFixed(2)} USDT)`);
     
-    // 留 5% 做手续费缓冲
     const usableUSDT = usdtBalance * BUFFER_RATIO;
-    
-    // 计算可买数量
     let amount = Math.floor(usableUSDT / price);
     
-    // 检查是否满足最小数量
     if (amount < MIN_DOGE) {
       const minRequired = MIN_DOGE * price;
-      if (usdtBalance >= minRequired) {
-        amount = MIN_DOGE; // 刚好够买最小数量
-      } else {
-        throw new Error(`❌ 余额不足，至少需要 ${minRequired.toFixed(2)} USDT (当前: ${usdtBalance.toFixed(2)} USDT)`);
-      }
+      if (usdtBalance >= minRequired) amount = MIN_DOGE;
+      else throw new Error(`❌ 余额不足，至少需要 ${minRequired.toFixed(2)} USDT (当前: ${usdtBalance.toFixed(2)} USDT)`);
     }
     
-    return { 
-      amount, 
-      cost: amount * price,
-      usdtBalance 
-    };
-    
+    return { amount, cost: amount * price, usdtBalance };
   } else {
-    // SELL: 卖出全部 DOGE
     const dogeBalance = await getAvailableBalance('DOGE');
-    if (dogeBalance < MIN_DOGE) {
-      throw new Error(`❌ DOGE 余额不足 (当前: ${dogeBalance} DOGE)`);
-    }
-    
-    return { 
-      amount: Math.floor(dogeBalance), 
-      cost: 0,
-      dogeBalance 
-    };
+    if (dogeBalance < MIN_DOGE) throw new Error(`❌ DOGE 余额不足 (当前: ${dogeBalance} DOGE)`);
+    return { amount: Math.floor(dogeBalance), cost: 0, dogeBalance };
   }
 }
 
@@ -119,11 +114,7 @@ async function executeTrade(side) {
     const price = await getMarketPrice();
     const { amount, cost, usdtBalance, dogeBalance } = await calculateTradeAmount(side, price);
     
-    console.log(`交易信息: ${side} ${amount} DOGE, 价格: ${price}, 成本: ${cost}`);
-    
-    if (amount <= 0) {
-      return { success: false, error: '计算数量失败' };
-    }
+    if (amount <= 0) return { success: false, error: '计算数量失败' };
     
     const body = JSON.stringify({
       instId: 'DOGE-USDT',
@@ -145,7 +136,6 @@ async function executeTrade(side) {
       };
     }
     
-    // 错误处理
     if (res.msg?.includes('key') || res.msg?.includes('permission')) {
       return { success: false, error: '❌ API 无交易权限 (请检查 OKX API 权限)' };
     }
@@ -179,13 +169,11 @@ async function calculateAIConfidence() {
     
     let confidence = 70;
     
-    // 价格趋势
     if (priceTrend > 0.01) confidence += 8;
     else if (priceTrend > 0.002) confidence += 4;
     else if (priceTrend < -0.01) confidence -= 8;
     else if (priceTrend < -0.002) confidence -= 4;
     
-    // 成交量
     if (volumeRatio > 1.5) confidence += 10;
     else if (volumeRatio > 1.2) confidence += 6;
     else if (volumeRatio < 0.8) confidence -= 5;
@@ -198,6 +186,8 @@ async function calculateAIConfidence() {
 
 /* ========= 止盈止损 ========= */
 async function checkAutoTrade() {
+  if (!QUANT_ENABLED) return;
+  
   const pos = await getRealPosition();
   if (!pos) return;
   
@@ -224,44 +214,39 @@ export default async function handler(req, res) {
     const pos = await getRealPosition();
     const aiConfidence = await calculateAIConfidence();
     
-    // 获取实时余额
     const usdtBalance = await getAvailableBalance('USDT');
     const dogeBalance = await getAvailableBalance('DOGE');
     
-    // 手动交易
     if (action === 'buy') {
       if (pos) {
-        return res.json({ 
-          success: false, 
-          error: '已有持仓，请先卖出后再买入',
-          holding: true 
-        });
+        return res.json({ success: false, error: '已有持仓，请先卖出后再买入', holding: true });
       }
       return res.json(await executeTrade('BUY'));
     }
     
     if (action === 'sell') {
       if (!pos) {
-        return res.json({ 
-          success: false, 
-          error: '暂无持仓，无法卖出',
-          holding: false 
-        });
+        return res.json({ success: false, error: '暂无持仓，无法卖出', holding: false });
       }
       return res.json(await executeTrade('SELL'));
     }
     
-    // 自动止盈止损
-    await checkAutoTrade();
+    if (action === 'quant') {
+      QUANT_ENABLED = !QUANT_ENABLED;
+      return res.json({ success: true, quantEnabled: QUANT_ENABLED, message: `量化交易已${QUANT_ENABLED ? '开启' : '关闭'}` });
+    }
     
-    // 计算盈亏
+    if (action === 'checkprofit') {
+      await checkAutoTrade();
+      return res.json({ success: true, checked: true });
+    }
+    
     let pnl = 0, pnlPercent = 0;
     if (pos) {
       pnl = (price - pos.avgPrice) * pos.amount;
       pnlPercent = ((price - pos.avgPrice) / pos.avgPrice) * 100;
     }
     
-    // 返回完整数据
     res.json({
       success: true,
       price: Number(price.toFixed(5)),
@@ -272,13 +257,11 @@ export default async function handler(req, res) {
       usdtBalance: Number(usdtBalance.toFixed(2)),
       dogeBalance: Number(dogeBalance.toFixed(2)),
       canBuy: usdtBalance > 0,
+      quantEnabled: QUANT_ENABLED,
       timestamp: Date.now()
     });
     
   } catch (err) {
-    res.status(200).json({ 
-      success: false, 
-      error: err.message 
-    });
+    res.status(200).json({ success: false, error: err.message });
   }
 }
