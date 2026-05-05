@@ -195,6 +195,7 @@
         }
         .btn-start { background: var(--accent-blue); color: white; }
         .btn-stop { background: var(--accent-yellow); color: black; }
+        .btn-start.running { background: var(--accent-green); }
 
         .stat-item {
             display: flex;
@@ -299,8 +300,8 @@
 
                 <div style="margin-bottom: 10px; font-size: 13px; color: var(--text-secondary); margin-top: 20px;">自动交易</div>
                 <div class="auto-trade-btns">
-                    <button class="btn-auto btn-start" onclick="startAutoTrade()">🚀 启动量化交易</button>
-                    <button class="btn-auto btn-stop" onclick="stopAutoTrade()">■ 停止自动交易</button>
+                    <button class="btn-auto btn-start" id="quantBtn" onclick="startAutoTrade()">🚀 启动量化交易</button>
+                    <button class="btn-auto btn-stop" id="stopBtn" onclick="stopAutoTrade()">■ 停止自动交易</button>
                 </div>
             </div>
 
@@ -326,6 +327,7 @@
     let chartData = [];
     let isTrading = false;
     let lastUpdateTime = 0;
+    let quantTimer = null;
     
     // ================= 初始化图表 =================
     function initChart() {
@@ -401,16 +403,12 @@
         const now = Date.now();
         chartData.push([now, price]);
         
-        // 只保留最近100个点
-        if (chartData.length > 100) {
-            chartData.shift();
-        }
+        if (chartData.length > 100) chartData.shift();
         
         if (myChart) {
             myChart.setOption({ series: [{ data: chartData }] });
         }
         
-        // 更新时间显示
         const timeStr = new Date().toLocaleTimeString();
         document.getElementById('chartUpdateTime').textContent = timeStr;
         document.getElementById('updateTime').textContent = timeStr.split(':').slice(0, 2).join(':');
@@ -428,7 +426,6 @@
         if (barEl) {
             barEl.style.width = confidence + '%';
             
-            // 动态颜色
             if (confidence >= 80) {
                 barEl.style.background = 'linear-gradient(90deg, #10b981, #34d399)';
                 if (signalEl) {
@@ -456,10 +453,10 @@
         const buyBtn = document.getElementById('buyBtn');
         const sellBtn = document.getElementById('sellBtn');
         const hintEl = document.getElementById('tradeHint');
+        const quantBtn = document.getElementById('quantBtn');
         
         if (!buyBtn || !sellBtn || !hintEl) return;
         
-        // 买入按钮状态
         if (data.holding) {
             buyBtn.disabled = true;
             buyBtn.innerHTML = '已有持仓';
@@ -471,7 +468,6 @@
             buyBtn.innerHTML = '买入 (Buy)';
         }
         
-        // 卖出按钮状态
         sellBtn.disabled = !data.holding;
         if (!data.holding) {
             sellBtn.innerHTML = '无持仓';
@@ -480,8 +476,20 @@
             sellBtn.innerHTML = '卖出 (Sell)';
         }
         
-        // 交易提示
-        if (!data.canBuy) {
+        if (quantBtn) {
+            if (data.quantEnabled) {
+                quantBtn.innerHTML = '✅ 量化运行中';
+                quantBtn.className = 'btn-auto btn-start running';
+            } else {
+                quantBtn.innerHTML = '🚀 启动量化交易';
+                quantBtn.className = 'btn-auto btn-start';
+            }
+        }
+        
+        if (data.quantEnabled) {
+            hintEl.textContent = '量化交易运行中，自动监控止盈止损';
+            hintEl.style.color = '#10b981';
+        } else if (!data.canBuy) {
             hintEl.textContent = 'USDT余额不足，无法买入';
             hintEl.style.color = '#ef4444';
         } else if (data.holding) {
@@ -512,7 +520,6 @@
                 return;
             }
             
-            // 更新价格
             const priceEl = document.getElementById('currentPrice');
             const changeEl = document.getElementById('priceChange');
             if (priceEl) priceEl.textContent = data.price.toFixed(5);
@@ -522,16 +529,13 @@
                 changeEl.style.color = data.pnlPercent >= 0 ? '#10b981' : '#ef4444';
             }
             
-            // 更新余额
             const usdtBalanceEl = document.getElementById('usdtBalanceDisplay');
             const dogeBalanceEl = document.getElementById('dogeBalanceDisplay');
             if (usdtBalanceEl) usdtBalanceEl.textContent = data.usdtBalance.toFixed(2) + ' USDT';
             if (dogeBalanceEl) dogeBalanceEl.textContent = data.dogeBalance.toFixed(2) + ' DOGE';
             
-            // 更新AI信心
             updateAIConfidence(data.aiConfidence);
             
-            // 更新持仓信息
             const holdingEl = document.getElementById('holdingStatus');
             const pnlEl = document.getElementById('floatingPnl');
             if (holdingEl) {
@@ -543,17 +547,14 @@
                 pnlEl.style.color = data.pnl >= 0 ? '#10b981' : '#ef4444';
             }
             
-            // 更新按钮状态
             updateButtonState(data);
-            
-            // 更新图表
             updateChart(data.price);
             
-            // 更新状态栏
             lastUpdateTime = Date.now();
             if (statusBar) {
                 const timeStr = new Date().toLocaleTimeString();
-                statusBar.innerHTML = `✅ 系统运行正常 | 余额: ${data.usdtBalance.toFixed(2)} USDT | 更新: ${timeStr}`;
+                const quantStatus = data.quantEnabled ? '✅ 量化运行中' : '⏸️ 量化已停止';
+                statusBar.innerHTML = `${quantStatus} | 余额: ${data.usdtBalance.toFixed(2)} USDT | 更新: ${timeStr}`;
             }
             
         } catch (err) {
@@ -574,7 +575,6 @@
         const sellBtn = document.getElementById('sellBtn');
         const statusBar = document.getElementById('statusBar');
         
-        // 禁用按钮
         if (buyBtn) buyBtn.disabled = true;
         if (sellBtn) sellBtn.disabled = true;
         if (statusBar) {
@@ -594,42 +594,96 @@
             alert('❌ 网络错误，请重试');
         } finally {
             isTrading = false;
-            // 刷新数据
-            await fetchData();
+            setTimeout(fetchData, 1000);
         }
     }
     
     // ================= 自动交易 =================
-    function startAutoTrade() {
-        alert('🚀 启动量化交易功能（开发中）');
+    async function startAutoTrade() {
+        const quantBtn = document.getElementById('quantBtn');
+        if (quantBtn) {
+            quantBtn.disabled = true;
+            quantBtn.innerHTML = '⏳ 启动中...';
+        }
+        
+        try {
+            const res = await fetch('/api/doge?action=quant');
+            const data = await res.json();
+            
+            if (data.success) {
+                alert(data.message);
+                
+                if (quantTimer) clearInterval(quantTimer);
+                quantTimer = setInterval(() => {
+                    fetch('/api/doge?action=check');
+                }, 10000);
+                
+                setTimeout(fetchData, 1000);
+            } else {
+                alert('❌ 启动失败: ' + data.error);
+                if (quantBtn) {
+                    quantBtn.disabled = false;
+                    quantBtn.innerHTML = '🚀 启动量化交易';
+                }
+            }
+        } catch (err) {
+            alert('❌ 网络错误: ' + err.message);
+            if (quantBtn) {
+                quantBtn.disabled = false;
+                quantBtn.innerHTML = '🚀 启动量化交易';
+            }
+        }
     }
     
-    function stopAutoTrade() {
-        alert('■ 停止自动交易');
+    async function stopAutoTrade() {
+        const quantBtn = document.getElementById('quantBtn');
+        if (quantBtn) {
+            quantBtn.disabled = true;
+            quantBtn.innerHTML = '⏳ 停止中...';
+        }
+        
+        try {
+            const res = await fetch('/api/doge?action=quant');
+            const data = await res.json();
+            
+            if (data.success) {
+                alert(data.message);
+                
+                if (quantTimer) {
+                    clearInterval(quantTimer);
+                    quantTimer = null;
+                }
+                
+                setTimeout(fetchData, 1000);
+            } else {
+                alert('❌ 停止失败: ' + data.error);
+                if (quantBtn) {
+                    quantBtn.disabled = false;
+                    quantBtn.innerHTML = '✅ 量化运行中';
+                }
+            }
+        } catch (err) {
+            alert('❌ 网络错误: ' + err.message);
+            if (quantBtn) {
+                quantBtn.disabled = false;
+                quantBtn.innerHTML = '✅ 量化运行中';
+            }
+        }
     }
     
     // ================= 初始化 =================
     document.addEventListener('DOMContentLoaded', () => {
-        // 初始化图表
         initChart();
-        
-        // 立即加载数据
         fetchData();
-        
-        // 每3秒刷新一次
         setInterval(fetchData, 3000);
         
-        // 窗口大小变化时重绘图表
         window.addEventListener('resize', () => {
-            if (myChart) {
-                myChart.resize();
-            }
+            if (myChart) myChart.resize();
         });
         
-        // 定时检查连接状态
         setInterval(() => {
             const now = Date.now();
-            if (now - lastUpdateTime > 10000) { // 10秒无更新
+            if (now - lastUpdateTime > 10000) {
                 const statusBar = document.getElementById('statusBar');
                 if (statusBar) {
                     statusBar.innerHTML = '⚠️ 连接超时，正在重试...';
