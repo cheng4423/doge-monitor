@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DOGE 量化交易终端</title>
+    <title>DOGE AI量化交易终端</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <style>
         :root {
@@ -337,11 +337,19 @@
         let isAIRunning = false;
         let refreshInterval = null;
         let lastData = null;
+        let aiStartTime = null;
         
-        // 当前后端API地址 - 自动适应部署环境
-        const API_BASE_URL = window.location.hostname === 'localhost' 
-            ? 'http://localhost:3000/api/doge'  // 本地开发
-            : '/api/doge';                      // 线上部署
+        // ✅ 修复：动态获取API地址
+        const getAPIBase = () => {
+            // 如果是本地开发，使用绝对地址
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                return 'http://localhost:3000';
+            }
+            // 如果是Vercel部署，使用相对地址
+            return window.location.origin;
+        };
+        
+        const API_BASE = getAPIBase();
 
         // ================= 初始化图表 =================
         function initChart() {
@@ -417,11 +425,9 @@
         // ================= 从后端获取数据 =================
         async function fetchBackendData() {
             try {
-                addLog('正在连接后端服务器...', 'info');
-                
-                const response = await fetch(API_BASE_URL);
+                const response = await fetch(`${API_BASE}/api/doge`);
                 if (!response.ok) {
-                    throw new Error(`HTTP错误: ${response.status}`);
+                    throw new Error(`HTTP错误: ${response.status} - ${response.statusText}`);
                 }
                 
                 const data = await response.json();
@@ -436,7 +442,7 @@
         // ================= 更新UI界面 =================
         function updateUI(data) {
             if (!data) {
-                // 如果没数据，显示占位符
+                // 没有数据时显示占位符
                 document.getElementById('currentPrice').textContent = '--';
                 document.getElementById('priceChange').textContent = '--';
                 document.getElementById('usdtBalance').textContent = '--';
@@ -447,12 +453,10 @@
                 document.getElementById('pnlPercent').textContent = '--';
                 return;
             }
-            
+
             if (data.success === false) {
                 const errorMsg = data?.error || '获取数据失败';
                 addLog(`数据错误: ${errorMsg}`, 'error');
-                
-                // 显示错误状态
                 document.getElementById('tradeStatus').textContent = errorMsg;
                 document.getElementById('tradeStatus').style.color = 'var(--accent-red)';
                 return;
@@ -480,7 +484,7 @@
             if (data.holding) {
                 holdingEl.textContent = '持仓中';
                 holdingEl.style.color = 'var(--accent-green)';
-                avgPriceEl.textContent = data.avgPrice ? data.avgPrice.toFixed(5) : '--';
+                avgPriceEl.textContent = data.avgPrice ? data.avgPrice.toFixed(5) + ' USDT' : '--';
             } else {
                 holdingEl.textContent = '空仓';
                 holdingEl.style.color = 'var(--text-secondary)';
@@ -498,6 +502,11 @@
             pnlEl.className = 'stat-value ' + pnlClass;
             pnlPercentEl.className = 'stat-value ' + pnlClass;
             
+            // 更新AI量化状态
+            if (data.quantEnabled !== undefined) {
+                updateAIStatus(data.quantEnabled);
+            }
+            
             // 更新按钮状态
             updateButtonState(data);
             
@@ -507,6 +516,28 @@
             // 更新交易状态
             document.getElementById('tradeStatus').textContent = '数据已更新';
             document.getElementById('tradeStatus').style.color = 'var(--accent-green)';
+        }
+
+        // ================= 更新AI量化状态 =================
+        function updateAIStatus(isRunning) {
+            isAIRunning = isRunning;
+            const startBtn = document.getElementById('aiStartBtn');
+            const stopBtn = document.getElementById('aiStopBtn');
+            const statusText = document.getElementById('aiStatus');
+            
+            if (startBtn && stopBtn && statusText) {
+                if (isRunning) {
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    statusText.textContent = '状态: 运行中';
+                    statusText.style.color = 'var(--accent-green)';
+                } else {
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    statusText.textContent = '状态: 已停止';
+                    statusText.style.color = 'var(--text-secondary)';
+                }
+            }
         }
 
         // ================= 更新图表 =================
@@ -637,18 +668,21 @@
                 addLog(`${side === 'buy' ? '买入' : '卖出'} ${amount} DOGE 请求中...`, 'info');
                 
                 // ✅ 调用后端交易接口
-                const response = await fetch(`${API_BASE_URL}?action=${side}`);
+                const response = await fetch(`${API_BASE}/api/doge?action=${side}`);
                 const data = await response.json();
                 
                 if (data.success) {
-                    addLog(`✅ ${side === 'buy' ? '买入' : '卖出'}成功: ${data.amount || amount} DOGE`, 'success');
+                    addLog(`✅ ${side === 'buy' ? '买入' : '卖出'}成功`, 'success');
+                    if (data.amount) {
+                        addLog(`数量: ${data.amount} DOGE, 价格: ${data.price} USDT`, 'success');
+                    }
                     statusEl.textContent = `${side === 'buy' ? '买入' : '卖出'}成功`;
                     statusEl.style.color = 'var(--accent-green)';
                     
                     // 立即刷新数据
-                    await refreshData();
+                    setTimeout(refreshData, 1000);
                 } else {
-                    addLog(`❌ ${side === 'buy' ? '买入' : '卖出'}失败: ${data.error}`, 'error');
+                    addLog(`❌ 交易失败: ${data.error}`, 'error');
                     statusEl.textContent = data.error || '交易失败';
                     statusEl.style.color = 'var(--accent-red)';
                 }
@@ -670,47 +704,73 @@
         }
 
         // ================= AI量化控制 =================
-        function startAI() {
+        async function startAI() {
             if (isAIRunning) {
                 addLog('AI量化已在运行中', 'info');
                 return;
             }
             
-            isAIRunning = true;
-            
-            // 更新UI状态
-            document.getElementById('aiStartBtn').disabled = true;
-            document.getElementById('aiStopBtn').disabled = false;
-            document.getElementById('aiStatus').textContent = '状态: 运行中';
-            document.getElementById('aiStatus').style.color = 'var(--accent-green)';
-            
-            addLog('🚀 AI量化交易已启动', 'success');
-            addLog('策略: 趋势跟踪 + 动态止盈止损', 'info');
-            
-            // 启动AI交易循环
-            aiTimer = setInterval(runAIStrategy, 10000); // 每10秒执行一次
-            
-            alert('✅ AI量化交易已启动！');
+            try {
+                addLog('启动AI量化交易...', 'info');
+                
+                const response = await fetch(`${API_BASE}/api/doge?action=quant`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    isAIRunning = true;
+                    aiStartTime = Date.now();
+                    
+                    // 更新UI状态
+                    updateAIStatus(true);
+                    
+                    addLog('🚀 AI量化交易已启动', 'success');
+                    addLog('策略: 趋势跟踪 + 动态止盈止损', 'info');
+                    
+                    // 启动AI交易循环
+                    aiTimer = setInterval(runAIStrategy, 10000);
+                    
+                    alert('✅ AI量化交易已启动！');
+                } else {
+                    addLog(`启动失败: ${data.error || '未知错误'}`, 'error');
+                    alert('❌ 启动失败: ' + (data.error || '未知错误'));
+                }
+            } catch (error) {
+                addLog(`启动失败: ${error.message}`, 'error');
+                alert('❌ 网络错误: ' + error.message);
+            }
         }
         
-        function stopAI() {
+        async function stopAI() {
             if (!isAIRunning) {
                 addLog('AI量化未运行', 'info');
                 return;
             }
             
-            isAIRunning = false;
-            clearInterval(aiTimer);
-            
-            // 更新UI状态
-            document.getElementById('aiStartBtn').disabled = false;
-            document.getElementById('aiStopBtn').disabled = true;
-            document.getElementById('aiStatus').textContent = '状态: 已停止';
-            document.getElementById('aiStatus').style.color = 'var(--text-secondary)';
-            
-            addLog('⏹️ AI量化已停止', 'info');
-            
-            alert('⏹️ AI量化交易已停止');
+            try {
+                addLog('停止AI量化交易...', 'info');
+                
+                const response = await fetch(`${API_BASE}/api/doge?action=quant`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    isAIRunning = false;
+                    clearInterval(aiTimer);
+                    
+                    // 更新UI状态
+                    updateAIStatus(false);
+                    
+                    const runtime = aiStartTime ? Math.floor((Date.now() - aiStartTime) / 1000) : 0;
+                    addLog(`⏹️ AI量化已停止, 运行时长: ${runtime}秒`, 'info');
+                    
+                    alert('⏹️ AI量化交易已停止');
+                } else {
+                    addLog(`停止失败: ${data.error || '未知错误'}`, 'error');
+                    alert('❌ 停止失败: ' + (data.error || '未知错误'));
+                }
+            } catch (error) {
+                addLog(`停止失败: ${error.message}`, 'error');
+                alert('❌ 网络错误: ' + error.message);
+            }
         }
         
         // ================= AI交易策略 =================
@@ -760,13 +820,13 @@
             
             // 初始化日志
             addLog('系统初始化完成', 'info');
-            addLog('正在连接后端服务器...', 'info');
+            addLog(`API地址: ${API_BASE}`, 'info');
             
             // 首次加载数据
             refreshData();
             
             // 设置定时刷新
-            refreshInterval = setInterval(refreshData, 3000); // 每3秒刷新一次
+            refreshInterval = setInterval(refreshData, 3000);
             
             // 监听窗口大小变化
             window.addEventListener('resize', () => {
@@ -785,15 +845,20 @@
                 });
             }
             
-            // 添加键盘快捷键
+            // 添加快捷键
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'F5') {
+                if (e.ctrlKey && e.key === 'r') {
                     e.preventDefault();
                     refreshData();
                     addLog('手动刷新数据', 'info');
                 }
             });
         });
+
+        // 导出函数到全局
+        window.executeManualTrade = executeManualTrade;
+        window.startAI = startAI;
+        window.stopAI = stopAI;
     </script>
 </body>
 </html>
