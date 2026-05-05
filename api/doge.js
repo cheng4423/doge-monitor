@@ -7,49 +7,58 @@ const PASSPHRASE = process.env.OKX_API_PASSPHRASE;
 const MODE = process.env.TRADE_MODE || 'REAL';
 const BASE = 'https://www.okx.com';
 
+const MIN_USDT = 20;
 const MIN_DOGE = 10;
-const TRADE_USDT = 25;
+const TAKE_PROFIT = 0.03;
+const STOP_LOSS = -0.02;
 
-let activePosition = null;
-
-// ✅ 修复：OKX V5 正确签名格式（必须加 \n）
+// ✅ 正确 OKX V5 签名
 function sign(ts, method, path, body = '') {
   const msg = `${ts}${method}${path}\n${body}\n`;
   return crypto.createHmac('sha256', SECRET).update(msg).digest('base64');
 }
 
-async function getMarketData() {
-  try {
-    const res = await fetch(`${BASE}/api/v5/market/ticker?instId=DOGE-USDT`, {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
-      }
-    });
+// ✅ 请求封装
+async function okxRequest(method, path, body = '') {
+  const ts = new Date().toISOString();
+  const headers = {
+    'Content-Type': 'application/json',
+    'OK-ACCESS-KEY': API_KEY,
+    'OK-ACCESS-SIGN': sign(ts, method, path, body),
+    'OK-ACCESS-TIMESTAMP': ts,
+    'OK-ACCESS-PASSPHRASE': PASSPHRASE
+  };
 
-    const text = await res.text();
-    if (!text.trim().startsWith('{')) throw new Error('返回非JSON，可能被风控');
-
-    const json = JSON.parse(text);
-    if (json.code !== '0') throw new Error(json.msg);
-
-    const price = Number(json.data[0].last);
-    if (isNaN(price) || price <= 0) throw new Error('价格无效');
-    return { price };
-  } catch (err) {
-    throw new Error('获取行情失败: ' + err.message);
-  }
+  const res = await fetch(BASE + path, { method, headers, body: method === 'POST' ? body : undefined });
+  return res.json();
 }
 
-async function executeTrade(side, price) {
-  let amount = Math.floor(TRADE_USDT / price);
+// ✅ 获取价格
+async function getMarketPrice() {
+  const json = await okxRequest('GET', '/api/v5/market/ticker?instId=DOGE-USDT');
+  if (json.code !== '0') throw new Error(json.msg);
+  return Number(json.data[0].last);
+}
+
+// ✅ 获取现货余额（正确！）
+async function getSpotBalance(ccy) {
+  const json = await okxRequest('GET', `/api/v5/account/balance?ccy=${ccy}`);
+  if (json.code !== '0') return 0;
+  return Number(json.data[0].details[0]?.availBal || 0);
+}
+
+// ✅ 下单
+async function executeTrade(side) {
+  const price = await getMarketPrice();
+  let amount = Math.floor(MIN_USDT / price);
   if (amount < MIN_DOGE) amount = MIN_DOGE;
 
-  if (MODE === 'DEMO') {
-    return { success: true, demo: true, side, price, amount };
+  if (side === 'SELL') {
+    const balance = await getSpotBalance('DOGE');
+    amount = Math.min(amount, Math.floor(balance));
+    if (amount < 1) return { success: false, error: 'DOGE 可用不足' };
   }
 
-  const path = '/api/v5/trade/order';
   const body = JSON.stringify({
     instId: 'DOGE-USDT',
     tdMode: 'cash',
@@ -58,91 +67,53 @@ async function executeTrade(side, price) {
     sz: String(amount)
   });
 
-  const ts = new Date().toISOString();
-  const headers = {
-    'Content-Type': 'application/json',
-    'OK-ACCESS-KEY': API_KEY,
-    'OK-ACCESS-SIGN': sign(ts, 'POST', path, body),
-    'OK-ACCESS-TIMESTAMP': ts,
-    'OK-ACCESS-PASSPHRASE': PASSPHRASE
-  };
-
-  const res = await fetch(BASE + path, { method: 'POST', headers, body });
-  const data = await res.json();
-
-  if (data.code === '0') {
-    return {
-      success: true,
-      orderId: data.data[0]?.ordId,
-      amount,
-      raw: data
-    };
-  }
-  return { success: false, error: data.msg || '下单失败', raw: data };
+  const res = await okxRequest('POST', '/api/v5/trade/order', body);
+  if (res.code === '0') return { success: true, amount };
+  return { success: false, error: res.msg };
 }
 
+// ✅ 自动策略
+async function checkAutoTrade() {
+  const dogeBal = await getSpotBalance('DOGE');
+  if (dogeBal < 1) return;
+
+  const holdPrice = await getMarketPrice(); // 简易版，正式版可用历史成交
+  const currentPrice = await getMarketPrice();
+  const pnl = (currentPrice - holdPrice) / holdPrice;
+
+  if (pnl >= TAKE_PROFIT || pnl <= STOP_LOSS) {
+    await executeTrade('SELL');
+  }
+}
+
+// ✅ HTTP 接口
 export default async function handler(req, res) {
-  // ✅ 修复：支持浏览器跨域 + OPTIONS 预检
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     const { action } = req.query;
+    const dogeBal = await getSpotBalance('DOGE');
+    const holding = dogeBal >= 1;
 
     if (action === 'buy') {
-      // 临时内存持仓，生产建议用 redis / 数据库
-      if (activePosition) {
-        return res.json({ success: false, error: '当前已有持仓（内存记录）' });
-      }
-
-      const { price } = await getMarketData();
-      const result = await executeTrade('BUY', price);
-
-      if (result.success) {
-        activePosition = { price, amount: result.amount, time: Date.now() };
-        return res.json({
-          success: true,
-          action: 'BUY',
-          msg: `买入 ${result.amount} DOGE 成功`,
-          price
-        });
-      }
-
-      return res.json({ success: false, error: result.error });
+      if (holding) return res.json({ success: false, error: '已有持仓' });
+      const r = await executeTrade('BUY');
+      return res.json(r);
     }
 
     if (action === 'sell') {
-      if (!activePosition) {
-        return res.json({ success: false, error: '暂无持仓（内存记录）' });
-      }
-
-      const { price } = await getMarketData();
-      const result = await executeTrade('SELL', price);
-
-      if (result.success) {
-        activePosition = null;
-        return res.json({
-          success: true,
-          action: 'SELL',
-          msg: '卖出成功',
-          price
-        });
-      }
-
-      return res.json({ success: false, error: result.error });
+      if (!holding) return res.json({ success: false, error: '无持仓' });
+      const r = await executeTrade('SELL');
+      return res.json(r);
     }
 
-    // 默认返回行情
-    const { price } = await getMarketData();
-    res.json({
-      success: true,
-      price,
-      holding: !!activePosition,
-      position: activePosition
-    });
+    // 自动交易
+    await checkAutoTrade();
+
+    const price = await getMarketPrice();
+    res.json({ success: true, price, holding });
 
   } catch (err) {
     res.status(200).json({ success: false, error: err.message });
