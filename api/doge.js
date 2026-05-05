@@ -1,24 +1,26 @@
 // api/doge.js
 import crypto from 'crypto';
 
+/* ========= 1️⃣ 环境 ========= */
 const API_KEY = process.env.OKX_API_KEY;
 const SECRET = process.env.OKX_API_SECRET;
 const PASSPHRASE = process.env.OKX_API_PASSPHRASE;
 const MODE = process.env.TRADE_MODE || 'REAL';
 const BASE = 'https://www.okx.com';
 
+/* ========= 2️⃣ 风控参数 ========= */
 const MIN_USDT = 20;
 const MIN_DOGE = 10;
 const TAKE_PROFIT = 0.03;
 const STOP_LOSS = -0.02;
 
-// ✅ 正确 OKX V5 签名
+/* ========= 3️⃣ OKX 签名 ========= */
 function sign(ts, method, path, body = '') {
-  const msg = `${ts}${method}${path}\n${body}\n`;
+  const msg = ts + method + path + body;
   return crypto.createHmac('sha256', SECRET).update(msg).digest('base64');
 }
 
-// ✅ 请求封装
+/* ========= 4️⃣ 请求封装 ========= */
 async function okxRequest(method, path, body = '') {
   const ts = new Date().toISOString();
   const headers = {
@@ -29,34 +31,53 @@ async function okxRequest(method, path, body = '') {
     'OK-ACCESS-PASSPHRASE': PASSPHRASE
   };
 
-  const res = await fetch(BASE + path, { method, headers, body: method === 'POST' ? body : undefined });
+  const res = await fetch(BASE + path, {
+    method,
+    headers,
+    body: method === 'POST' ? body : undefined
+  });
+
   return res.json();
 }
 
-// ✅ 获取价格
+/* ========= 5️⃣ 行情 ========= */
 async function getMarketPrice() {
   const json = await okxRequest('GET', '/api/v5/market/ticker?instId=DOGE-USDT');
   if (json.code !== '0') throw new Error(json.msg);
   return Number(json.data[0].last);
 }
 
-// ✅ 获取现货余额（正确！）
+/* ========= 6️⃣ 现货余额 ========= */
 async function getSpotBalance(ccy) {
   const json = await okxRequest('GET', `/api/v5/account/balance?ccy=${ccy}`);
   if (json.code !== '0') return 0;
   return Number(json.data[0].details[0]?.availBal || 0);
 }
 
-// ✅ 下单
+/* ========= 7️⃣ ✅ 真实持仓（关键） ========= */
+async function getRealPosition() {
+  const json = await okxRequest('GET', '/api/v5/account/positions?instId=DOGE-USDT');
+  if (json.code !== '0') return null;
+
+  const pos = json.data.find(p => Number(p.pos) > 0);
+  if (!pos) return null;
+
+  return {
+    amount: Number(pos.pos),
+    avgPrice: Number(pos.avgPx)
+  };
+}
+
+/* ========= 8️⃣ 下单 ========= */
 async function executeTrade(side) {
   const price = await getMarketPrice();
   let amount = Math.floor(MIN_USDT / price);
   if (amount < MIN_DOGE) amount = MIN_DOGE;
 
   if (side === 'SELL') {
-    const balance = await getSpotBalance('DOGE');
-    amount = Math.min(amount, Math.floor(balance));
-    if (amount < 1) return { success: false, error: 'DOGE 可用不足' };
+    const pos = await getRealPosition();
+    if (!pos) return { success: false, error: '无持仓' };
+    amount = Math.min(amount, Math.floor(pos.amount));
   }
 
   const body = JSON.stringify({
@@ -72,44 +93,41 @@ async function executeTrade(side) {
   return { success: false, error: res.msg };
 }
 
-// ✅ 自动策略
+/* ========= 9️⃣ 自动止盈止损 ========= */
 async function checkAutoTrade() {
-  const dogeBal = await getSpotBalance('DOGE');
-  if (dogeBal < 1) return;
+  const pos = await getRealPosition();
+  if (!pos) return;
 
-  const holdPrice = await getMarketPrice(); // 简易版，正式版可用历史成交
   const currentPrice = await getMarketPrice();
-  const pnl = (currentPrice - holdPrice) / holdPrice;
+  const pnl = (currentPrice - pos.avgPrice) / pos.avgPrice;
 
   if (pnl >= TAKE_PROFIT || pnl <= STOP_LOSS) {
     await executeTrade('SELL');
   }
 }
 
-// ✅ HTTP 接口
+/* ========= 🔟 HTTP 入口 ========= */
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
     const { action } = req.query;
-    const dogeBal = await getSpotBalance('DOGE');
-    const holding = dogeBal >= 1;
+    const pos = await getRealPosition();
+    const holding = !!pos;
 
     if (action === 'buy') {
       if (holding) return res.json({ success: false, error: '已有持仓' });
-      const r = await executeTrade('BUY');
-      return res.json(r);
+      return res.json(await executeTrade('BUY'));
     }
 
     if (action === 'sell') {
       if (!holding) return res.json({ success: false, error: '无持仓' });
-      const r = await executeTrade('SELL');
-      return res.json(r);
+      return res.json(await executeTrade('SELL'));
     }
 
-    // 自动交易
     await checkAutoTrade();
 
     const price = await getMarketPrice();
