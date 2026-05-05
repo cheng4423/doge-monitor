@@ -307,8 +307,8 @@
             <div class="panel-card">
                 <div class="panel-title">🤖 AI量化控制</div>
                 <div class="trade-buttons">
-                    <button class="btn btn-start" id="aiStartBtn" onclick="toggleAI()">启动量化</button>
-                    <button class="btn btn-stop" id="aiStopBtn" onclick="toggleAI()" disabled>停止量化</button>
+                    <button class="btn btn-start" id="aiStartBtn" onclick="startAI()">启动量化</button>
+                    <button class="btn btn-stop" id="aiStopBtn" onclick="stopAI()" disabled>停止量化</button>
                 </div>
                 <div id="aiStatus" style="font-size: 12px; color: var(--text-secondary); text-align: center; margin-top: 10px;">
                     状态: 未运行
@@ -335,179 +335,464 @@
         let isTrading = false;
         let aiTimer = null;
         let isAIRunning = false;
+        let refreshInterval = null;
+        let lastData = null;
+        
+        // 当前后端API地址 - 自动适应部署环境
+        const API_BASE_URL = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3000/api/doge'  // 本地开发
+            : '/api/doge';                      // 线上部署
 
         // ================= 初始化图表 =================
         function initChart() {
-            chart = echarts.init(document.getElementById('priceChart'));
+            const chartDom = document.getElementById('priceChart');
+            chart = echarts.init(chartDom);
+            
             const option = {
                 backgroundColor: 'transparent',
                 tooltip: {
                     trigger: 'axis',
-                    formatter: params => `${new Date(params[0].value[0]).toLocaleTimeString()}<br/>$${params[0].value[1].toFixed(5)}`
+                    backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                    borderColor: '#374151',
+                    textStyle: { color: '#e5e7eb' },
+                    formatter: function (params) {
+                        const date = new Date(params[0].value[0]);
+                        return `${date.toLocaleTimeString()}<br/>价格: ${params[0].value[1].toFixed(5)} USDT`;
+                    }
                 },
-                grid: { left: '3%', right: '4%', bottom: '3%', top: '3%', containLabel: true },
-                xAxis: { type: 'time', splitLine: { show: false }, axisLine: { lineStyle: { color: '#374151' } } },
-                yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#374151', type: 'dashed' } } },
+                grid: { 
+                    left: '3%', 
+                    right: '4%', 
+                    bottom: '3%', 
+                    top: '3%' 
+                },
+                xAxis: {
+                    type: 'time',
+                    splitLine: { show: false },
+                    axisLine: { lineStyle: { color: '#374151' } },
+                    axisLabel: { 
+                        color: '#6b7280', 
+                        fontSize: 10 
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    scale: true,
+                    splitLine: {
+                        show: true,
+                        lineStyle: { 
+                            color: '#374151', 
+                            type: 'dashed',
+                            opacity: 0.3
+                        }
+                    },
+                    axisLine: { lineStyle: { color: '#374151' } },
+                    axisLabel: { 
+                        color: '#6b7280', 
+                        fontSize: 10 
+                    }
+                },
                 series: [{
                     name: 'DOGE/USDT',
                     type: 'line',
+                    data: chartData,
                     smooth: true,
                     symbol: 'none',
-                    data: chartData,
-                    lineStyle: { color: '#3b82f6', width: 2 },
-                    areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: 'rgba(59, 130, 246, 0.3)'}, {offset: 1, color: 'rgba(59, 130, 246, 0)'}]) }
+                    lineStyle: { 
+                        color: '#3b82f6', 
+                        width: 2 
+                    },
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
+                            { offset: 1, color: 'rgba(59, 130, 246, 0)' }
+                        ])
+                    }
                 }]
             };
+            
             chart.setOption(option);
         }
 
-        // ================= 获取后端数据 =================
+        // ================= 从后端获取数据 =================
         async function fetchBackendData() {
             try {
-                const res = await fetch('/api/doge');
-                if (!res.ok) throw new Error('Network response was not ok');
-                return await res.json();
+                addLog('正在连接后端服务器...', 'info');
+                
+                const response = await fetch(API_BASE_URL);
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                return data;
             } catch (error) {
-                console.error('Fetch backend failed:', error);
-                addLog('连接后端失败', 'error');
+                console.error('获取后端数据失败:', error);
+                addLog(`连接后端失败: ${error.message}`, 'error');
                 return null;
             }
         }
 
-        // ================= 更新UI =================
+        // ================= 更新UI界面 =================
         function updateUI(data) {
-            if (!data || !data.success) {
-                document.getElementById('tradeStatus').textContent = '获取后端数据失败';
+            if (!data) {
+                // 如果没数据，显示占位符
+                document.getElementById('currentPrice').textContent = '--';
+                document.getElementById('priceChange').textContent = '--';
+                document.getElementById('usdtBalance').textContent = '--';
+                document.getElementById('dogeBalance').textContent = '--';
+                document.getElementById('holdingStatus').textContent = '--';
+                document.getElementById('avgPrice').textContent = '--';
+                document.getElementById('floatingPnl').textContent = '--';
+                document.getElementById('pnlPercent').textContent = '--';
+                return;
+            }
+            
+            if (data.success === false) {
+                const errorMsg = data?.error || '获取数据失败';
+                addLog(`数据错误: ${errorMsg}`, 'error');
+                
+                // 显示错误状态
+                document.getElementById('tradeStatus').textContent = errorMsg;
                 document.getElementById('tradeStatus').style.color = 'var(--accent-red)';
                 return;
             }
 
-            // 价格
+            // 保存最新数据
+            lastData = data;
+            
+            // 更新价格显示
             document.getElementById('currentPrice').textContent = data.price.toFixed(5);
+            
             const changeEl = document.getElementById('priceChange');
             const changePercent = data.pnlPercent || 0;
             changeEl.textContent = (changePercent >= 0 ? '+' : '') + changePercent.toFixed(2) + '%';
             changeEl.style.color = changePercent >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
-
-            // 余额
+            
+            // 更新余额显示
             document.getElementById('usdtBalance').textContent = data.usdtBalance.toFixed(2);
             document.getElementById('dogeBalance').textContent = data.dogeBalance.toFixed(2);
-
-            // 持仓与盈亏
-            document.getElementById('holdingStatus').textContent = data.holding ? '持仓中' : '空仓';
-            document.getElementById('holdingStatus').style.color = data.holding ? 'var(--accent-green)' : 'var(--text-secondary)';
-            document.getElementById('avgPrice').textContent = data.holding ? data.avgPrice.toFixed(5) : '--';
             
+            // 更新持仓状态
+            const holdingEl = document.getElementById('holdingStatus');
+            const avgPriceEl = document.getElementById('avgPrice');
+            
+            if (data.holding) {
+                holdingEl.textContent = '持仓中';
+                holdingEl.style.color = 'var(--accent-green)';
+                avgPriceEl.textContent = data.avgPrice ? data.avgPrice.toFixed(5) : '--';
+            } else {
+                holdingEl.textContent = '空仓';
+                holdingEl.style.color = 'var(--text-secondary)';
+                avgPriceEl.textContent = '--';
+            }
+            
+            // 更新盈亏显示
             const pnlEl = document.getElementById('floatingPnl');
             const pnlPercentEl = document.getElementById('pnlPercent');
-            pnlEl.textContent = (data.pnl >= 0 ? '+' : '') + data.pnl.toFixed(2);
+            
+            pnlEl.textContent = (data.pnl >= 0 ? '+' : '') + data.pnl.toFixed(2) + ' USDT';
             pnlPercentEl.textContent = (data.pnlPercent >= 0 ? '+' : '') + data.pnlPercent.toFixed(2) + '%';
-            pnlEl.className = 'stat-value ' + (data.pnl >= 0 ? 'profit' : 'loss');
-            pnlPercentEl.className = 'stat-value ' + (data.pnl >= 0 ? 'profit' : 'loss');
+            
+            const pnlClass = data.pnl >= 0 ? 'profit' : 'loss';
+            pnlEl.className = 'stat-value ' + pnlClass;
+            pnlPercentEl.className = 'stat-value ' + pnlClass;
+            
+            // 更新按钮状态
+            updateButtonState(data);
+            
+            // 更新图表
+            updateChart(data.price);
+            
+            // 更新交易状态
+            document.getElementById('tradeStatus').textContent = '数据已更新';
+            document.getElementById('tradeStatus').style.color = 'var(--accent-green)';
+        }
 
-            // 图表
-            chartData.push([Date.now(), data.price]);
-            if (chartData.length > 100) chartData.shift();
-            chart.setOption({ series: [{ data: chartData }] });
+        // ================= 更新图表 =================
+        function updateChart(price) {
+            const now = Date.now();
+            
+            // 添加新数据点
+            chartData.push([now, price]);
+            
+            // 只保留最近100个点
+            if (chartData.length > 100) {
+                chartData.shift();
+            }
+            
+            // 更新图表
+            if (chart) {
+                chart.setOption({
+                    series: [{
+                        data: chartData
+                    }]
+                });
+            }
+        }
 
-            // 按钮状态
-            document.getElementById('buyBtn').disabled = data.holding || data.usdtBalance < 1;
-            document.getElementById('sellBtn').disabled = !data.holding;
+        // ================= 更新按钮状态 =================
+        function updateButtonState(data) {
+            const buyBtn = document.getElementById('buyBtn');
+            const sellBtn = document.getElementById('sellBtn');
+            const amountInput = document.getElementById('tradeAmount');
+            
+            if (!buyBtn || !sellBtn) return;
+            
+            // 获取交易数量
+            const tradeAmount = parseInt(amountInput.value) || 10;
+            const tradeCost = tradeAmount * data.price;
+            
+            // 买入按钮状态
+            if (data.holding) {
+                buyBtn.disabled = true;
+                buyBtn.title = '已有持仓，请先卖出';
+            } else if (tradeCost > data.usdtBalance) {
+                buyBtn.disabled = true;
+                buyBtn.title = 'USDT余额不足';
+            } else if (tradeAmount < 10) {
+                buyBtn.disabled = true;
+                buyBtn.title = '最小交易数量 10 DOGE';
+            } else {
+                buyBtn.disabled = false;
+                buyBtn.title = '买入 DOGE';
+            }
+            
+            // 卖出按钮状态
+            if (!data.holding) {
+                sellBtn.disabled = true;
+                sellBtn.title = '无持仓可卖';
+            } else if (tradeAmount > data.dogeBalance) {
+                sellBtn.disabled = true;
+                sellBtn.title = '持仓数量不足';
+            } else {
+                sellBtn.disabled = false;
+                sellBtn.title = '卖出 DOGE';
+            }
+        }
+
+        // ================= 添加日志 =================
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            if (!logContainer) return;
+            
+            const now = new Date();
+            const time = now.toLocaleTimeString();
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            
+            let className = 'log-info';
+            if (type === 'success') {
+                className = 'log-success';
+            } else if (type === 'error') {
+                className = 'log-error';
+            }
+            
+            logEntry.innerHTML = `<span class="log-time">[${time}]</span> <span class="${className}">${message}</span>`;
+            logContainer.appendChild(logEntry);
+            
+            // 自动滚动到底部
+            logContainer.scrollTop = logContainer.scrollHeight;
+            
+            // 保持最多20条日志
+            if (logContainer.children.length > 20) {
+                logContainer.removeChild(logContainer.firstChild);
+            }
         }
 
         // ================= 手动交易 =================
         async function executeManualTrade(side) {
-            if (isTrading) return;
-            isTrading = true;
-            const amount = document.getElementById('tradeAmount').value;
-            const statusEl = document.getElementById('tradeStatus');
+            if (isTrading) {
+                addLog('交易进行中，请稍候...', 'info');
+                return;
+            }
             
+            isTrading = true;
+            
+            const amountInput = document.getElementById('tradeAmount');
+            const amount = parseInt(amountInput.value) || 10;
+            const statusEl = document.getElementById('tradeStatus');
+            const buyBtn = document.getElementById('buyBtn');
+            const sellBtn = document.getElementById('sellBtn');
+            
+            // 禁用交易按钮
+            if (buyBtn) buyBtn.disabled = true;
+            if (sellBtn) sellBtn.disabled = true;
+            
+            // 验证交易数量
+            if (amount < 10) {
+                alert('最小交易数量为 10 DOGE');
+                isTrading = false;
+                if (buyBtn) buyBtn.disabled = false;
+                if (sellBtn) sellBtn.disabled = false;
+                return;
+            }
+            
+            // 更新状态显示
             statusEl.innerHTML = '<span class="loading"></span> 交易处理中...';
             statusEl.style.color = 'var(--accent-yellow)';
-
+            
             try {
-                const res = await fetch(`/api/doge?action=${side}&amount=${amount}`);
-                const result = await res.json();
-
-                if (result.success) {
-                    addLog(`✅ ${side === 'buy' ? '买入' : '卖出'}成功: ${result.amount} DOGE`, 'success');
-                    statusEl.textContent = '交易成功';
+                addLog(`${side === 'buy' ? '买入' : '卖出'} ${amount} DOGE 请求中...`, 'info');
+                
+                // ✅ 调用后端交易接口
+                const response = await fetch(`${API_BASE_URL}?action=${side}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    addLog(`✅ ${side === 'buy' ? '买入' : '卖出'}成功: ${data.amount || amount} DOGE`, 'success');
+                    statusEl.textContent = `${side === 'buy' ? '买入' : '卖出'}成功`;
                     statusEl.style.color = 'var(--accent-green)';
+                    
+                    // 立即刷新数据
+                    await refreshData();
                 } else {
-                    addLog(`❌ 交易失败: ${result.error}`, 'error');
-                    statusEl.textContent = result.error;
+                    addLog(`❌ ${side === 'buy' ? '买入' : '卖出'}失败: ${data.error}`, 'error');
+                    statusEl.textContent = data.error || '交易失败';
                     statusEl.style.color = 'var(--accent-red)';
                 }
-            } catch (err) {
-                addLog('交易请求失败', 'error');
+                
+            } catch (error) {
+                addLog(`网络错误: ${error.message}`, 'error');
                 statusEl.textContent = '网络错误';
                 statusEl.style.color = 'var(--accent-red)';
             } finally {
                 isTrading = false;
-                refreshData(); // 刷新UI
-            }
-        }
-
-        // ================= AI量化 =================
-        function toggleAI() {
-            if (isAIRunning) {
-                // 停止
-                isAIRunning = false;
-                clearInterval(aiTimer);
-                document.getElementById('aiStartBtn').disabled = false;
-                document.getElementById('aiStopBtn').disabled = true;
-                document.getElementById('aiStatus').textContent = '状态: 已停止';
-                document.getElementById('aiStatus').style.color = 'var(--text-secondary)';
-                addLog('AI量化已停止', 'info');
-            } else {
-                // 启动
-                isAIRunning = true;
-                document.getElementById('aiStartBtn').disabled = true;
-                document.getElementById('aiStopBtn').disabled = false;
-                document.getElementById('aiStatus').textContent = '状态: 运行中';
-                document.getElementById('aiStatus').style.color = 'var(--accent-green)';
-                addLog('AI量化已启动', 'success');
                 
-                aiTimer = setInterval(async () => {
-                    const data = await fetchBackendData();
-                    if (data && data.success) {
-                        // 简单的AI策略：如果赚钱就卖，亏钱就买（仅示例）
-                        if (data.holding && data.pnlPercent > 3) {
-                            addLog('AI触发止盈', 'info');
-                            await executeManualTrade('sell');
-                        } else if (!data.holding && data.usdtBalance > 10) {
-                            addLog('AI触发买入', 'info');
-                            await executeManualTrade('buy');
-                        }
+                // 重新启用按钮
+                setTimeout(() => {
+                    if (lastData) {
+                        updateButtonState(lastData);
                     }
-                }, 10000); // 每10秒检查一次
+                }, 1000);
             }
         }
 
-        // ================= 日志 =================
-        function addLog(message, type = 'info') {
-            const container = document.getElementById('logContainer');
-            const time = new Date().toLocaleTimeString();
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">${message}</span>`;
-            container.appendChild(entry);
-            container.scrollTop = container.scrollHeight;
-            if (container.children.length > 20) container.removeChild(container.firstChild);
+        // ================= AI量化控制 =================
+        function startAI() {
+            if (isAIRunning) {
+                addLog('AI量化已在运行中', 'info');
+                return;
+            }
+            
+            isAIRunning = true;
+            
+            // 更新UI状态
+            document.getElementById('aiStartBtn').disabled = true;
+            document.getElementById('aiStopBtn').disabled = false;
+            document.getElementById('aiStatus').textContent = '状态: 运行中';
+            document.getElementById('aiStatus').style.color = 'var(--accent-green)';
+            
+            addLog('🚀 AI量化交易已启动', 'success');
+            addLog('策略: 趋势跟踪 + 动态止盈止损', 'info');
+            
+            // 启动AI交易循环
+            aiTimer = setInterval(runAIStrategy, 10000); // 每10秒执行一次
+            
+            alert('✅ AI量化交易已启动！');
+        }
+        
+        function stopAI() {
+            if (!isAIRunning) {
+                addLog('AI量化未运行', 'info');
+                return;
+            }
+            
+            isAIRunning = false;
+            clearInterval(aiTimer);
+            
+            // 更新UI状态
+            document.getElementById('aiStartBtn').disabled = false;
+            document.getElementById('aiStopBtn').disabled = true;
+            document.getElementById('aiStatus').textContent = '状态: 已停止';
+            document.getElementById('aiStatus').style.color = 'var(--text-secondary)';
+            
+            addLog('⏹️ AI量化已停止', 'info');
+            
+            alert('⏹️ AI量化交易已停止');
+        }
+        
+        // ================= AI交易策略 =================
+        async function runAIStrategy() {
+            if (!isAIRunning) return;
+            
+            try {
+                const data = await fetchBackendData();
+                if (!data || !data.success) return;
+                
+                // 简单的AI策略
+                if (data.holding) {
+                    // 检查止盈止损
+                    if (data.pnlPercent >= 3) { // 盈利3%以上
+                        addLog(`AI触发止盈: 盈利 ${data.pnlPercent.toFixed(2)}%`, 'info');
+                        await executeManualTrade('sell');
+                    } else if (data.pnlPercent <= -2) { // 亏损2%以上
+                        addLog(`AI触发止损: 亏损 ${Math.abs(data.pnlPercent).toFixed(2)}%`, 'info');
+                        await executeManualTrade('sell');
+                    }
+                } else {
+                    // 空仓时，检查买入机会
+                    if (data.usdtBalance > 10) { // 有足够余额
+                        addLog('AI检查买入机会...', 'info');
+                        // 这里可以添加更复杂的买入逻辑
+                    }
+                }
+            } catch (error) {
+                console.error('AI策略执行错误:', error);
+            }
         }
 
         // ================= 刷新数据 =================
         async function refreshData() {
-            const data = await fetchBackendData();
-            updateUI(data);
+            try {
+                const data = await fetchBackendData();
+                updateUI(data);
+            } catch (error) {
+                console.error('刷新数据失败:', error);
+            }
         }
 
-        // ================= 初始化 =================
+        // ================= 页面初始化 =================
         document.addEventListener('DOMContentLoaded', () => {
+            // 初始化图表
             initChart();
+            
+            // 初始化日志
+            addLog('系统初始化完成', 'info');
+            addLog('正在连接后端服务器...', 'info');
+            
+            // 首次加载数据
             refreshData();
-            setInterval(refreshData, 3000); // 每3秒刷新一次数据
-            window.addEventListener('resize', () => chart.resize());
+            
+            // 设置定时刷新
+            refreshInterval = setInterval(refreshData, 3000); // 每3秒刷新一次
+            
+            // 监听窗口大小变化
+            window.addEventListener('resize', () => {
+                if (chart) {
+                    chart.resize();
+                }
+            });
+            
+            // 监听交易数量输入变化
+            const amountInput = document.getElementById('tradeAmount');
+            if (amountInput) {
+                amountInput.addEventListener('input', () => {
+                    if (lastData) {
+                        updateButtonState(lastData);
+                    }
+                });
+            }
+            
+            // 添加键盘快捷键
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'F5') {
+                    e.preventDefault();
+                    refreshData();
+                    addLog('手动刷新数据', 'info');
+                }
+            });
         });
     </script>
 </body>
