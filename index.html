@@ -3,528 +3,640 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI DOGE 量化交易</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>DOGE 量化交易终端</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <style>
         :root {
-            --primary: #00f2ff;
-            --buy: #00ff88;
-            --sell: #ff4757;
-            --background: #0a0e1a;
-            --card: #0f172a;
+            --bg-dark: #0a0e1a;
+            --bg-card: #111827;
+            --border-color: #1f2937;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9ca3af;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-yellow: #f59e0b;
         }
-        
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: var(--background);
-            color: #e0e0e0;
-            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             height: 100vh;
             overflow: hidden;
         }
-        
-        .neon-border {
-            border: 1px solid var(--primary);
-            box-shadow: 0 0 8px rgba(0, 242, 255, 0.3);
-        }
-        
-        .grid-container {
-            display: grid;
-            grid-template-columns: 1fr 320px;
-            grid-template-rows: 60px 1fr 200px;
-            gap: 12px;
-            height: 100vh;
-            padding: 12px;
-        }
-        
-        /* 顶部栏 */
-        .header {
-            grid-column: 1 / -1;
-            background: var(--card);
-            border-radius: 8px;
-            padding: 0 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        /* 主图表区 - 横版 */
-        .main-chart {
-            grid-column: 1;
-            grid-row: 2;
-            background: var(--card);
-            border-radius: 8px;
-            padding: 15px;
+
+        .container {
             display: flex;
             flex-direction: column;
+            height: 100vh;
+            padding: 15px;
+            gap: 15px;
         }
-        
-        /* 控制面板 */
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-card);
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            font-size: 14px;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .price-info { text-align: right; }
+        .price-main { 
+            font-size: 24px; 
+            font-weight: bold; 
+            color: var(--accent-green);
+        }
+        .price-change { 
+            font-size: 13px; 
+            font-weight: bold;
+        }
+
+        .main-area {
+            display: flex;
+            flex: 1;
+            gap: 15px;
+            overflow: hidden;
+        }
+
+        .chart-container {
+            flex: 1;
+            background: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            position: relative;
+            padding: 10px;
+        }
+
         .control-panel {
-            grid-column: 2;
-            grid-row: 2;
-            background: var(--card);
-            border-radius: 8px;
-            padding: 15px;
-            overflow-y: auto;
+            width: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
         }
-        
-        /* 日志区 */
-        .logs {
-            grid-column: 1 / -1;
-            grid-row: 3;
-            background: var(--card);
-            border-radius: 8px;
-            padding: 15px;
+
+        .panel-card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            padding: 20px;
         }
-        
-        /* 按钮样式 */
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* 余额提示 */
+        .balance-info {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+        .balance-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 3px 0;
+        }
+
+        .ai-confidence { margin-bottom: 20px; }
+        .confidence-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+        .confidence-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: #374151;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .confidence-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            width: 70%;
+            transition: width 0.5s ease, background 0.5s ease;
+        }
+
+        .trade-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
         .btn {
-            padding: 10px 15px;
-            border-radius: 6px;
+            flex: 1;
+            padding: 12px;
             border: none;
+            border-radius: 8px;
             font-weight: bold;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: opacity 0.2s, transform 0.1s;
+            font-size: 14px;
         }
-        
-        .btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        .btn:hover { opacity: 0.9; }
+        .btn:active { transform: scale(0.98); }
+        .btn-buy { 
+            background: var(--accent-green); 
+            color: black;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
         }
-        
-        .btn-buy { background: var(--buy); color: #000; }
-        .btn-sell { background: var(--sell); color: #fff; }
-        .btn-start { background: #007bff; color: #fff; }
-        .btn-stop { background: #ffa502; color: #000; }
-        
-        /* 价格卡片 */
-        .price-card {
-            background: linear-gradient(135deg, #1a1f33, #0f1329);
-            padding: 10px 20px;
+        .btn-sell { 
+            background: var(--accent-red); 
+            color: white;
+            box-shadow: 0 4px 14px rgba(239, 68, 68, 0.3);
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .auto-trade-btns {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .btn-auto {
+            width: 100%;
+            padding: 12px;
+            border: none;
             border-radius: 8px;
-            text-align: center;
-        }
-        
-        .current-price {
-            font-size: 28px;
             font-weight: bold;
-        }
-        
-        /* 状态指示灯 */
-        .status-indicator {
-            display: inline-flex;
+            cursor: pointer;
+            display: flex;
             align-items: center;
-            gap: 6px;
+            justify-content: center;
+            gap: 8px;
+            font-size: 14px;
         }
-        
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
+        .btn-start { background: var(--accent-blue); color: white; }
+        .btn-stop { background: var(--accent-yellow); color: black; }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border-color);
         }
+        .stat-item:last-child { border-bottom: none; }
         
-        .status-on { background: #00ff88; }
-        .status-off { background: #ff4757; }
-        
-        /* 策略标签 */
-        .strategy-tag {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 12px;
+        .status-bar {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(17, 24, 39, 0.9);
+            padding: 8px 20px;
+            border-radius: 20px;
             font-size: 12px;
-            margin-right: 6px;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(10px);
         }
         
-        .tag-good { background: rgba(0, 255, 136, 0.2); color: var(--buy); }
-        .tag-bad { background: rgba(255, 71, 87, 0.2); color: var(--sell); }
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(156, 163, 175, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--accent-blue);
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
-    <div class="grid-container">
-        <!-- 顶部栏 -->
-        <div class="header">
-            <div class="flex items-center gap-4">
-                <h1 class="text-xl font-bold" style="color: var(--primary)">🤖 DOGE 量化交易</h1>
-                <div class="price-card">
-                    <div class="current-price" id="currentPrice">0.0000</div>
-                    <div class="text-sm" id="priceChange">+0.00%</div>
-                </div>
+
+<div class="container">
+    <header class="header">
+        <div class="logo-section">
+            <span>🐕</span>
+            <span>DOGE 量化交易</span>
+        </div>
+        <div class="price-info">
+            <div class="price-main" id="currentPrice">--</div>
+            <div class="price-change" id="priceChange">--</div>
+        </div>
+        <div style="text-align: right;">
+            <div style="font-size: 13px; color: var(--text-secondary);">AI信心: <span id="aiConfidenceHeader">--</span></div>
+            <div style="font-size: 12px; margin-top: 2px;" id="tradeSignal">● 连接中...</div>
+        </div>
+    </header>
+
+    <div class="main-area">
+        <div class="chart-container">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 14px; color: var(--text-secondary);">
+                <span>📈 DOGE/USDT 实时走势</span>
+                <div id="chartUpdateTime" style="font-size: 12px;"></div>
             </div>
-            
-            <div class="flex items-center gap-6">
-                <div>
-                    <span class="text-sm text-gray-400">今日盈亏: </span>
-                    <span class="text-green-400 font-bold" id="dailyPnl">0.00</span> USDT
-                </div>
-                <div class="status-indicator">
-                    <span class="status-dot status-off" id="statusDot"></span>
-                    <span class="text-sm" id="statusText">未启动</span>
-                </div>
-            </div>
+            <div id="priceChart" style="width: 100%; height: calc(100% - 30px);"></div>
         </div>
 
-        <!-- 主图表区 - 横版 -->
-        <div class="main-chart">
-            <div class="flex justify-between items-center mb-3">
-                <h2 class="text-lg font-semibold" style="color: var(--primary)">📈 DOGE/USDT 价格曲线</h2>
-                <div class="text-sm text-gray-400">
-                    <span>策略: </span>
-                    <span id="strategy1" class="strategy-tag tag-good">加载中</span>
-                    <span id="strategy2" class="strategy-tag tag-good">...</span>
-                </div>
-            </div>
-            
-            <div style="flex: 1; position: relative;">
-                <canvas id="priceChart"></canvas>
-            </div>
-        </div>
-
-        <!-- 控制面板 -->
         <div class="control-panel">
-            <h2 class="text-lg font-semibold mb-4" style="color: var(--primary)">⚡ 交易控制</h2>
-            
-            <!-- AI状态 -->
-            <div class="mb-6">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="text-sm text-gray-400">AI 信心指数</span>
-                    <span class="text-lg font-bold text-green-400" id="aiConfidence">0%</span>
-                </div>
-                <div class="w-full bg-gray-800 rounded-full h-2">
-                    <div id="confidenceBar" class="bg-green-500 h-2 rounded-full" style="width: 0%;"></div>
-                </div>
-            </div>
-            
-            <!-- 手动交易 -->
-            <div class="mb-6">
-                <h3 class="text-sm font-semibold mb-3 text-gray-300">🖐️ 手动交易</h3>
-                <div class="grid grid-cols-2 gap-2">
-                    <button class="btn btn-buy" onclick="manualTrade('buy')">买入 (Buy)</button>
-                    <button class="btn btn-sell" onclick="manualTrade('sell')">卖出 (Sell)</button>
-                </div>
-            </div>
-            
-            <!-- 自动交易 -->
-            <div class="mb-6">
-                <h3 class="text-sm font-semibold mb-3 text-gray-300">🤖 自动交易</h3>
-                <div class="space-y-2">
-                    <button class="btn btn-start w-full" onclick="startAutoTrade()">🚀 启动量化交易</button>
-                    <button class="btn btn-stop w-full" onclick="stopAutoTrade()">⏹ 停止自动交易</button>
-                </div>
-            </div>
-            
-            <!-- 交易统计 -->
-            <div>
-                <h3 class="text-sm font-semibold mb-2 text-gray-300">📊 统计</h3>
-                <div class="text-sm space-y-1">
-                    <div class="flex justify-between">
-                        <span>总交易</span>
-                        <span id="totalTrades">0</span>
+            <div class="panel-card">
+                <div class="panel-title">⚡ 交易控制</div>
+                
+                <!-- 余额信息 -->
+                <div class="balance-info">
+                    <div class="balance-item">
+                        <span>USDT余额:</span>
+                        <span id="usdtBalanceDisplay" style="color: var(--accent-green); font-weight: bold;">--</span>
                     </div>
-                    <div class="flex justify-between">
-                        <span>持仓</span>
-                        <span id="openPositions">0</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>今日交易</span>
-                        <span id="todayTrades">0</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>胜率</span>
-                        <span id="winRate">0%</span>
+                    <div class="balance-item">
+                        <span>DOGE余额:</span>
+                        <span id="dogeBalanceDisplay" style="color: var(--accent-yellow);">--</span>
                     </div>
                 </div>
-            </div>
-        </div>
+                
+                <!-- AI信心 -->
+                <div class="ai-confidence">
+                    <div class="confidence-label">
+                        <span>🤖 AI 信心指数</span>
+                        <span id="aiConfidenceValue">--</span>
+                    </div>
+                    <div class="confidence-bar-bg">
+                        <div class="confidence-bar-fill" id="confidenceBar"></div>
+                    </div>
+                </div>
 
-        <!-- 日志区 -->
-        <div class="logs">
-            <div class="flex justify-between items-center mb-2">
-                <h2 class="text-lg font-semibold" style="color: var(--primary)">📊 交易日志</h2>
-                <button class="text-xs px-3 py-1 bg-gray-800 rounded" onclick="clearLogs()">清空</button>
+                <!-- 交易按钮 -->
+                <div style="margin-bottom: 10px; font-size: 13px; color: var(--text-secondary);">手动交易</div>
+                <div class="trade-buttons">
+                    <button class="btn btn-buy" id="buyBtn" onclick="manualTrade('buy')">买入 (Buy)</button>
+                    <button class="btn btn-sell" id="sellBtn" onclick="manualTrade('sell')">卖出 (Sell)</button>
+                </div>
+                
+                <!-- 交易提示 -->
+                <div id="tradeHint" style="font-size: 11px; color: var(--text-secondary); margin-top: 5px; min-height: 16px;"></div>
+
+                <div style="margin-bottom: 10px; font-size: 13px; color: var(--text-secondary); margin-top: 20px;">自动交易</div>
+                <div class="auto-trade-btns">
+                    <button class="btn-auto btn-start" onclick="startAutoTrade()">🚀 启动量化交易</button>
+                    <button class="btn-auto btn-stop" onclick="stopAutoTrade()">■ 停止自动交易</button>
+                </div>
             </div>
-            <div id="logContainer" class="h-32 overflow-y-auto text-sm space-y-1 font-mono">
-                <!-- 日志动态插入 -->
+
+            <!-- 统计 -->
+            <div class="panel-card">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; display: flex; align-items: center; gap: 5px;">📊 统计</div>
+                <div class="stat-item"><span>持仓状态</span><span id="holdingStatus">--</span></div>
+                <div class="stat-item"><span>持仓均价</span><span id="avgPrice">--</span></div>
+                <div class="stat-item"><span>浮动盈亏</span><span id="floatingPnl">--</span></div>
+                <div class="stat-item"><span>更新时间</span><span id="updateTime">--</span></div>
             </div>
         </div>
     </div>
+</div>
 
-    <script>
-        // ==================== 初始化变量 ====================
-        let isAutoTrading = false;
-        let autoInterval = null;
-        let tradeCount = 0;
-        let todayCount = 0;
-        let dailyProfit = 0;
-        let priceHistory = [];
-        let chart = null;
+<div class="status-bar" id="statusBar">
+    <span class="loading"></span> 连接中...
+</div>
+
+<script>
+    // ================= 全局变量 =================
+    let myChart = null;
+    let chartData = [];
+    let isTrading = false;
+    let lastUpdateTime = 0;
+    
+    // ================= 初始化图表 =================
+    function initChart() {
+        const chartDom = document.getElementById('priceChart');
+        if (!chartDom) return;
         
-        // ==================== 初始化图表 ====================
-        function initChart() {
-            const ctx = document.getElementById('priceChart').getContext('2d');
-            
-            chart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: '价格',
-                        data: [],
-                        borderColor: 'var(--primary)',
-                        backgroundColor: 'rgba(0, 242, 255, 0.1)',
-                        borderWidth: 2,
-                        tension: 0.1,
-                        fill: true,
-                        pointRadius: 0
-                    }]
+        myChart = echarts.init(chartDom);
+        
+        const option = {
+            backgroundColor: 'transparent',
+            tooltip: { 
+                trigger: 'axis', 
+                backgroundColor: 'rgba(17, 24, 39, 0.9)', 
+                borderColor: '#374151',
+                textStyle: { color: '#e5e7eb' },
+                formatter: function (params) {
+                    const date = new Date(params[0].value[0]);
+                    return `${date.toLocaleTimeString()}<br/>价格: ${params[0].value[1].toFixed(5)} USDT`;
+                }
+            },
+            grid: { left: '3%', right: '4%', bottom: '3%', top: '3%' },
+            xAxis: { 
+                type: 'time', 
+                splitLine: { show: false }, 
+                axisLine: { lineStyle: { color: '#374151' } },
+                axisLabel: { color: '#6b7280', fontSize: 10 }
+            },
+            yAxis: { 
+                type: 'value', 
+                scale: true, 
+                splitLine: { 
+                    show: true, 
+                    lineStyle: { 
+                        color: '#374151', 
+                        type: 'dashed',
+                        opacity: 0.3
+                    } 
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        x: {
-                            grid: { color: 'rgba(255,255,255,0.1)' },
-                            ticks: { color: '#aaa', maxTicksLimit: 10 }
-                        },
-                        y: {
-                            position: 'right',
-                            grid: { color: 'rgba(255,255,255,0.1)' },
-                            ticks: { color: '#aaa' }
-                        }
-                    }
+                axisLine: { lineStyle: { color: '#374151' } },
+                axisLabel: { 
+                    color: '#6b7280', 
+                    formatter: '{value}',
+                    fontSize: 10
                 }
-            });
+            },
+            series: [{
+                name: 'DOGE/USDT',
+                type: 'line',
+                data: chartData,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 2,
+                lineStyle: { 
+                    color: '#3b82f6', 
+                    width: 2,
+                    shadowColor: 'rgba(59, 130, 246, 0.3)',
+                    shadowBlur: 4
+                },
+                itemStyle: { color: '#3b82f6' },
+                areaStyle: { 
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: 'rgba(59, 130, 246, 0.3)' },
+                        { offset: 1, color: 'rgba(59, 130, 246, 0)' }
+                    ])
+                }
+            }]
+        };
+        myChart.setOption(option);
+    }
+    
+    // ================= 更新图表 =================
+    function updateChart(price) {
+        const now = Date.now();
+        chartData.push([now, price]);
+        
+        // 只保留最近100个点
+        if (chartData.length > 100) {
+            chartData.shift();
         }
         
-        // ==================== 更新状态显示 ====================
-        function updateStatus() {
-            const statusDot = document.getElementById('statusDot');
-            const statusText = document.getElementById('statusText');
+        if (myChart) {
+            myChart.setOption({ series: [{ data: chartData }] });
+        }
+        
+        // 更新时间显示
+        const timeStr = new Date().toLocaleTimeString();
+        document.getElementById('chartUpdateTime').textContent = timeStr;
+        document.getElementById('updateTime').textContent = timeStr.split(':').slice(0, 2).join(':');
+    }
+    
+    // ================= 更新AI信心 =================
+    function updateAIConfidence(confidence) {
+        const valueEl = document.getElementById('aiConfidenceValue');
+        const headerEl = document.getElementById('aiConfidenceHeader');
+        const barEl = document.getElementById('confidenceBar');
+        const signalEl = document.getElementById('tradeSignal');
+        
+        if (valueEl) valueEl.textContent = confidence + '%';
+        if (headerEl) headerEl.textContent = confidence + '%';
+        if (barEl) {
+            barEl.style.width = confidence + '%';
             
-            if (isAutoTrading) {
-                statusDot.className = 'status-dot status-on';
-                statusText.textContent = '运行中';
-                statusText.className = 'text-sm text-green-400';
+            // 动态颜色
+            if (confidence >= 80) {
+                barEl.style.background = 'linear-gradient(90deg, #10b981, #34d399)';
+                if (signalEl) {
+                    signalEl.textContent = '● 强烈买入信号';
+                    signalEl.style.color = '#10b981';
+                }
+            } else if (confidence >= 60) {
+                barEl.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
+                if (signalEl) {
+                    signalEl.textContent = '● 观望/持有';
+                    signalEl.style.color = '#f59e0b';
+                }
             } else {
-                statusDot.className = 'status-dot status-off';
-                statusText.textContent = '已停止';
-                statusText.className = 'text-sm text-red-400';
+                barEl.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+                if (signalEl) {
+                    signalEl.textContent = '● 风险提示';
+                    signalEl.style.color = '#ef4444';
+                }
             }
         }
+    }
+    
+    // ================= 更新按钮状态 =================
+    function updateButtonState(data) {
+        const buyBtn = document.getElementById('buyBtn');
+        const sellBtn = document.getElementById('sellBtn');
+        const hintEl = document.getElementById('tradeHint');
         
-        // ==================== 添加日志 ====================
-        function addLog(message, type = 'info') {
-            const logContainer = document.getElementById('logContainer');
-            const time = new Date().toLocaleTimeString();
-            const logEntry = document.createElement('div');
+        if (!buyBtn || !sellBtn || !hintEl) return;
+        
+        // 买入按钮状态
+        if (data.holding) {
+            buyBtn.disabled = true;
+            buyBtn.innerHTML = '已有持仓';
+        } else if (!data.canBuy || data.usdtBalance <= 0) {
+            buyBtn.disabled = true;
+            buyBtn.innerHTML = '余额不足';
+        } else {
+            buyBtn.disabled = false;
+            buyBtn.innerHTML = '买入 (Buy)';
+        }
+        
+        // 卖出按钮状态
+        sellBtn.disabled = !data.holding;
+        if (!data.holding) {
+            sellBtn.innerHTML = '无持仓';
+        } else {
+            sellBtn.disabled = false;
+            sellBtn.innerHTML = '卖出 (Sell)';
+        }
+        
+        // 交易提示
+        if (!data.canBuy) {
+            hintEl.textContent = 'USDT余额不足，无法买入';
+            hintEl.style.color = '#ef4444';
+        } else if (data.holding) {
+            hintEl.textContent = '当前持有仓位，可卖出或等待止盈';
+            hintEl.style.color = '#f59e0b';
+        } else {
+            hintEl.textContent = '可买入，系统会自动计算可用余额';
+            hintEl.style.color = '#10b981';
+        }
+    }
+    
+    // ================= 获取数据 =================
+    async function fetchData() {
+        try {
+            const statusBar = document.getElementById('statusBar');
+            if (statusBar) {
+                statusBar.innerHTML = '<span class="loading"></span> 获取数据中...';
+            }
             
-            let color = '';
-            switch(type) {
-                case 'buy': color = 'text-green-400'; break;
-                case 'sell': color = 'text-red-400'; break;
-                case 'warning': color = 'text-yellow-400'; break;
-                case 'error': color = 'text-red-500'; break;
-                default: color = 'text-gray-300';
-            }
+            const res = await fetch('/api/doge');
+            const data = await res.json();
             
-            logEntry.className = color;
-            logEntry.innerHTML = `[${time}] ${message}`;
-            logContainer.appendChild(logEntry);
-            logContainer.scrollTop = logContainer.scrollHeight;
-        }
-        
-        // ==================== 获取市场数据 ====================
-        async function fetchMarketData() {
-            try {
-                const res = await fetch('/api/doge?action=analyze');
-                const data = await res.json();
-                
-                if (!data.success) {
-                    addLog(`❌ API错误: ${data.error}`, 'error');
-                    return null;
+            if (!data.success) {
+                console.error('API错误:', data.error);
+                if (statusBar) {
+                    statusBar.innerHTML = `❌ ${data.error}`;
                 }
-                
-                // 更新价格显示
-                document.getElementById('currentPrice').textContent = data.price.toFixed(4);
-                const changeEl = document.getElementById('priceChange');
-                changeEl.textContent = (data.change >= 0 ? '+' : '') + data.change + '%';
-                changeEl.className = data.change >= 0 ? 'text-sm text-green-400' : 'text-sm text-red-400';
-                
-                // 更新AI状态
-                document.getElementById('aiConfidence').textContent = data.confidence + '%';
-                document.getElementById('confidenceBar').style.width = data.confidence + '%';
-                
-                // 更新信号
-                const statusText = document.getElementById('statusText');
-                if (data.action === 'BUY') {
-                    statusText.textContent = '买入信号';
-                    statusText.className = 'text-sm text-green-400';
-                } else if (data.action === 'SELL') {
-                    statusText.textContent = '卖出信号';
-                    statusText.className = 'text-sm text-red-400';
-                } else {
-                    statusText.textContent = '观望';
-                    statusText.className = 'text-sm text-yellow-400';
-                }
-                
-                // 更新策略标签
-                if (data.confidence >= 70) {
-                    document.getElementById('strategy1').textContent = '强烈信号';
-                    document.getElementById('strategy2').textContent = '高置信度';
-                } else if (data.confidence >= 50) {
-                    document.getElementById('strategy1').textContent = '普通信号';
-                    document.getElementById('strategy2').textContent = '中置信度';
-                } else {
-                    document.getElementById('strategy1').textContent = '观望';
-                    document.getElementById('strategy2').textContent = '低置信度';
-                }
-                
-                // 更新持仓显示
-                document.getElementById('openPositions').textContent = data.hasPosition ? '1' : '0';
-                
-                // 更新价格图表
-                priceHistory.push(data.price);
-                if (priceHistory.length > 60) priceHistory.shift();
-                
-                if (chart) {
-                    chart.data.datasets[0].data = priceHistory;
-                    chart.data.labels = priceHistory.map((_, i) => `${i}s`);
-                    chart.update('quiet');
-                }
-                
-                return data;
-                
-            } catch (error) {
-                addLog(`❌ 获取数据失败: ${error.message}`, 'error');
-                return null;
-            }
-        }
-        
-        // ==================== 手动交易 ====================
-        async function manualTrade(type) {
-            try {
-                addLog(`🖐️ 手动${type === 'buy' ? '买入' : '卖出'}中...`, 'info');
-                
-                const res = await fetch(`/api/doge?action=${type}`);
-                const data = await res.json();
-                
-                if (data.success) {
-                    addLog(`✅ 手动${type === 'buy' ? '买入' : '卖出'}成功！`, type);
-                    updateStats();
-                } else {
-                    addLog(`❌ 交易失败: ${data.error}`, 'error');
-                }
-            } catch (error) {
-                addLog(`❌ 交易错误: ${error.message}`, 'error');
-            }
-        }
-        
-        // ==================== 启动自动交易 ====================
-        function startAutoTrade() {
-            if (isAutoTrading) {
-                addLog('⚠️ 自动交易已在运行中', 'warning');
                 return;
             }
             
-            isAutoTrading = true;
-            updateStatus();
+            // 更新价格
+            const priceEl = document.getElementById('currentPrice');
+            const changeEl = document.getElementById('priceChange');
+            if (priceEl) priceEl.textContent = data.price.toFixed(5);
+            if (changeEl) {
+                const sign = data.pnlPercent >= 0 ? '+' : '';
+                changeEl.textContent = sign + data.pnlPercent.toFixed(2) + '%';
+                changeEl.style.color = data.pnlPercent >= 0 ? '#10b981' : '#ef4444';
+            }
             
-            autoInterval = setInterval(async () => {
-                try {
-                    // 1. 获取市场数据
-                    const data = await fetchMarketData();
-                    if (!data) return;
-                    
-                    // 2. 执行自动交易
-                    const tradeRes = await fetch('/api/doge?action=auto');
-                    const tradeData = await tradeRes.json();
-                    
-                    if (tradeData.success) {
-                        if (tradeData.action === 'BUY') {
-                            addLog(`🤖 自动买入: ${tradeData.reason}`, 'buy');
-                            updateStats();
-                        } else if (tradeData.action === 'SELL') {
-                            addLog(`🤖 自动卖出: ${tradeData.reason}`, 'sell');
-                            updateStats();
-                        }
-                        // 如果是HOLD，不记录日志，避免刷屏
-                    } else {
-                        addLog(`❌ 自动交易失败: ${tradeData.error}`, 'error');
-                    }
-                    
-                } catch (error) {
-                    addLog(`❌ 自动交易错误: ${error.message}`, 'error');
+            // 更新余额
+            const usdtBalanceEl = document.getElementById('usdtBalanceDisplay');
+            const dogeBalanceEl = document.getElementById('dogeBalanceDisplay');
+            if (usdtBalanceEl) usdtBalanceEl.textContent = data.usdtBalance.toFixed(2) + ' USDT';
+            if (dogeBalanceEl) dogeBalanceEl.textContent = data.dogeBalance.toFixed(2) + ' DOGE';
+            
+            // 更新AI信心
+            updateAIConfidence(data.aiConfidence);
+            
+            // 更新持仓信息
+            const holdingEl = document.getElementById('holdingStatus');
+            const pnlEl = document.getElementById('floatingPnl');
+            if (holdingEl) {
+                holdingEl.textContent = data.holding ? '持有中' : '空仓';
+                holdingEl.style.color = data.holding ? '#10b981' : '#9ca3af';
+            }
+            if (pnlEl) {
+                pnlEl.textContent = (data.pnl >= 0 ? '+' : '') + data.pnl.toFixed(2) + ' USDT';
+                pnlEl.style.color = data.pnl >= 0 ? '#10b981' : '#ef4444';
+            }
+            
+            // 更新按钮状态
+            updateButtonState(data);
+            
+            // 更新图表
+            updateChart(data.price);
+            
+            // 更新状态栏
+            lastUpdateTime = Date.now();
+            if (statusBar) {
+                const timeStr = new Date().toLocaleTimeString();
+                statusBar.innerHTML = `✅ 系统运行正常 | 余额: ${data.usdtBalance.toFixed(2)} USDT | 更新: ${timeStr}`;
+            }
+            
+        } catch (err) {
+            console.error('获取数据失败:', err);
+            const statusBar = document.getElementById('statusBar');
+            if (statusBar) {
+                statusBar.innerHTML = '❌ 网络连接失败';
+            }
+        }
+    }
+    
+    // ================= 交易函数 =================
+    async function manualTrade(type) {
+        if (isTrading) return;
+        
+        isTrading = true;
+        const buyBtn = document.getElementById('buyBtn');
+        const sellBtn = document.getElementById('sellBtn');
+        const statusBar = document.getElementById('statusBar');
+        
+        // 禁用按钮
+        if (buyBtn) buyBtn.disabled = true;
+        if (sellBtn) sellBtn.disabled = true;
+        if (statusBar) {
+            statusBar.innerHTML = '<span class="loading"></span> 交易处理中...';
+        }
+        
+        try {
+            const res = await fetch(`/api/doge?action=${type}`);
+            const data = await res.json();
+            
+            if (data.success) {
+                alert(`✅ ${type === 'buy' ? '买入' : '卖出'}成功！\n数量: ${data.amount} DOGE\n价格: ${data.price} USDT`);
+            } else {
+                alert(`❌ 交易失败\n${data.error}`);
+            }
+        } catch (err) {
+            alert('❌ 网络错误，请重试');
+        } finally {
+            isTrading = false;
+            // 刷新数据
+            await fetchData();
+        }
+    }
+    
+    // ================= 自动交易 =================
+    function startAutoTrade() {
+        alert('🚀 启动量化交易功能（开发中）');
+    }
+    
+    function stopAutoTrade() {
+        alert('■ 停止自动交易');
+    }
+    
+    // ================= 初始化 =================
+    document.addEventListener('DOMContentLoaded', () => {
+        // 初始化图表
+        initChart();
+        
+        // 立即加载数据
+        fetchData();
+        
+        // 每3秒刷新一次
+        setInterval(fetchData, 3000);
+        
+        // 窗口大小变化时重绘图表
+        window.addEventListener('resize', () => {
+            if (myChart) {
+                myChart.resize();
+            }
+        });
+        
+        // 定时检查连接状态
+        setInterval(() => {
+            const now = Date.now();
+            if (now - lastUpdateTime > 10000) { // 10秒无更新
+                const statusBar = document.getElementById('statusBar');
+                if (statusBar) {
+                    statusBar.innerHTML = '⚠️ 连接超时，正在重试...';
                 }
-            }, 5000); // 5秒执行一次
-            
-            addLog('🚀 量化交易已启动 (5秒/周期)', 'warning');
-        }
-        
-        // ==================== 停止自动交易 ====================
-        function stopAutoTrade() {
-            if (!isAutoTrading) return;
-            
-            isAutoTrading = false;
-            clearInterval(autoInterval);
-            updateStatus();
-            
-            addLog('⏹️ 量化交易已停止', 'warning');
-        }
-        
-        // ==================== 更新统计 ====================
-        function updateStats() {
-            tradeCount++;
-            todayCount++;
-            
-            // 模拟盈亏
-            const profit = (Math.random() * 3 - 1).toFixed(2);
-            dailyProfit = (parseFloat(dailyProfit) + parseFloat(profit)).toFixed(2);
-            
-            document.getElementById('totalTrades').textContent = tradeCount;
-            document.getElementById('todayTrades').textContent = todayCount;
-            document.getElementById('winRate').textContent = Math.floor(Math.random() * 20 + 70) + '%';
-            
-            // 更新每日盈亏
-            const dailyPnlEl = document.getElementById('dailyPnl');
-            dailyPnlEl.textContent = dailyProfit;
-            dailyPnlEl.className = dailyProfit >= 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold';
-        }
-        
-        // ==================== 清空日志 ====================
-        function clearLogs() {
-            document.getElementById('logContainer').innerHTML = '';
-            addLog('📁 日志已清空', 'info');
-        }
-        
-        // ==================== 初始化函数 ====================
-        async function init() {
-            // 初始化图表
-            initChart();
-            
-            // 更新状态
-            updateStatus();
-            
-            // 第一次获取数据
-            await fetchMarketData();
-            
-            // 定时获取数据
-            setInterval(fetchMarketData, 3000);
-            
-            // 添加初始日志
-            addLog('🚀 系统启动完成，等待交易信号...', 'info');
-            addLog('📡 连接欧易API...', 'info');
-            
-            // 模拟初始统计
-            setTimeout(() => {
-                tradeCount = 3;
-                todayCount = 1;
-                updateStats();
-            }, 1000);
-        }
-        
-        // ==================== 页面加载 ====================
-        window.onload = init;
-    </script>
+            }
+        }, 5000);
+    });
+</script>
 </body>
 </html>
