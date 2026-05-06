@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/doge.js": {
+      "maxDuration": 60
+    }
+  }
+}
