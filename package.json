@@ -1,0 +1,13 @@
+{
+  "name": "doge-monitor",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "OKX Trading Bot",
+  "main": "index.html",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
